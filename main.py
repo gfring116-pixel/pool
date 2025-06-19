@@ -93,8 +93,8 @@ You can also reply to this DM and your message will be forwarded to the channel 
             sent_count += 1
             notified_users.append(str(member))
 
-            if sent_count % 10 == 0:
-                await ctx.send(f"Sent DMs to {sent_count} members")
+            if sent_count % 50 == 0:
+                await ctx.send(f"dmed {sent_count} members")
 
         except (discord.Forbidden, discord.HTTPException, Exception):
             failed_count += 1
