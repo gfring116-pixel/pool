@@ -60,13 +60,13 @@ async def dm_role_members(ctx):
     role = ctx.guild.get_role(role_id)
 
     if not role:
-        await ctx.send("loser")
+        await ctx.send("failed loser")
         return
 
     members_with_role = role.members
 
     if not members_with_role:
-        await ctx.send("um")
+        await ctx.send("no i don't want to")
         return
 
     await ctx.send(f" {len(members_with_role)} '{role.name}'...")
