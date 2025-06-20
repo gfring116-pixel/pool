@@ -1,13 +1,11 @@
 import discord
 from discord.ext import commands
-import logging
 from dotenv import load_dotenv
 import os
+import asyncio
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -15,109 +13,97 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Replace with your own user ID
-OWNER_ID = 728201873366056992
+TARGET_CHANNEL_ID = 1383802708024365238
+
+stored_dms = []
 
 @bot.event
 async def on_ready():
-    print(f'We have logged in as {bot.user}')
+    print(f'logged in as {bot.user}')
 
 @bot.event
 async def on_message(message):
-    # Don't respond to bot messages
     if message.author.bot:
         return
 
-    # Check if it's a DM to the bot
     if isinstance(message.channel, discord.DMChannel):
-        target_channel_id = 1383802708024365238
-        channel = bot.get_channel(target_channel_id)
+        print(f"got dm from {message.author}: {message.content}")
+        stored_dms.append({
+            "author": f"{message.author} ({message.author.id})",
+            "content": message.content
+        })
+        try:
+            await message.channel.send("message received")
+        except Exception as e:
+            print(f"failed to send confirmation to {message.author}: {e}")
 
-        if channel:
-            embed = discord.Embed(
-                title="DM Received",
-                description=message.content,
-                color=0x00ff00
-            )
-            embed.set_author(
-                name=f"{message.author.display_name} ({message.author.name})",
-                icon_url=message.author.avatar.url if message.author.avatar else None
-            )
-            embed.set_footer(text=f"User ID: {message.author.id}")
-
-            await channel.send(embed=embed)
-
-        # DM owner with info about who DMed the bot
-        owner = await bot.fetch_user(OWNER_ID)
-        if owner:
-            try:
-                await owner.send(f"{message.author} this dude: {message.content}")
-            except discord.Forbidden:
-                print("Could not DM the owner.")
-
-    # Process commands
     await bot.process_commands(message)
 
-@bot.command(name='rawr')
-@commands.has_permissions(administrator=True)
-async def dm_role_members(ctx):
-    """DM all members with the specified role"""
+@bot.command()
+async def sendpastdms(ctx):
+    channel = bot.get_channel(TARGET_CHANNEL_ID)
 
-    role_id = 1382280238842515587
-    role = ctx.guild.get_role(role_id)
-
-    if not role:
-        await ctx.send("failed")
+    if not stored_dms:
+        await ctx.send("no messages stored")
         return
 
-    members_with_role = role.members
-
-    if not members_with_role:
-        await ctx.send("no i don't want to")
+    if not channel:
+        await ctx.send("target channel not found")
         return
 
-    await ctx.send(f"{len(members_with_role)} '{role.name}'...")
-
-    dm_message = """
-We're checking in to see who's still active and wants to attend in server events.
-
-Please go to: https://discord.com/channels/1122152849833459842/1383802708024365238
-
-Say anything there if you're still here and want to participate in activities.
-
-If you're really busy and can't participate, you may leave the server https://discord.gg/pnvPBXsZ4T
-
-You can also reply to this DM and your message will be forwarded to the channel automatically."""
+    await ctx.send(f"sending {len(stored_dms)} messages to <#{TARGET_CHANNEL_ID}>")
 
     sent_count = 0
     failed_count = 0
-    notified_users = []
 
-    for member in members_with_role:
+    for i, dm in enumerate(stored_dms):
         try:
-            await member.send(dm_message)
+            # Handle very long messages by truncating them
+            content = dm["content"]
+            if len(content) > 4096:  # Discord embed description limit
+                content = content[:4093] + "..."
+            
+            embed = discord.Embed(
+                title="dm",
+                description=content,
+                color=0x2f3136
+            )
+            embed.set_footer(text=dm["author"])
+            
+            await channel.send(embed=embed)
             sent_count += 1
-            notified_users.append(str(member))
-
-            if sent_count % 50 == 0:
-                await ctx.send(f"dmed {sent_count} members")
-
-        except (discord.Forbidden, discord.HTTPException, Exception):
+            
+            # Add a small delay to avoid rate limiting
+            if i % 5 == 0 and i > 0:  # Every 5 messages
+                await asyncio.sleep(1)
+                
+        except discord.HTTPException as e:
+            print(f"failed to send message {i+1}: {e}")
             failed_count += 1
+            # Continue to next message instead of stopping
+            continue
+        except Exception as e:
+            print(f"unexpected error sending message {i+1}: {e}")
+            failed_count += 1
+            continue
 
-    summary = f"""
-• Sent: {sent_count} DMs
-• Failed to send: {failed_count} DMs
-• Total members with role: {len(members_with_role)}
+    # Send summary of results
+    summary_msg = f"done! sent {sent_count}/{len(stored_dms)} messages"
+    if failed_count > 0:
+        summary_msg += f" ({failed_count} failed)"
+    
+    await ctx.send(summary_msg)
 
-All DM responses will be forwarded to <#1383802708024365238>
-"""
-    await ctx.send(summary)
+@bot.command()
+async def cleardms(ctx):
+    """Clear all stored DMs"""
+    count = len(stored_dms)
+    stored_dms.clear()
+    await ctx.send(f"cleared {count} stored messages")
 
-    # DM the owner with the list of members who were messaged
-    owner = await bot.fetch_user(OWNER_ID)
-    if owner:
-        users = "\n".join(notified_users)
-        await owner.send(f"✅ DMed the following users:\n{users}")
+@bot.command()
+async def dmcount(ctx):
+    """Show how many DMs are stored"""
+    await ctx.send(f"currently storing {len(stored_dms)} messages")
 
 bot.run(token)
