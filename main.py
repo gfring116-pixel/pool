@@ -53,21 +53,31 @@ async def sendpastdms(ctx):
     print(f"sendpastdms command called by {ctx.author}")
     
     try:
+        # Debug: Check if command is even running
+        print("Command started executing...")
+        await ctx.send("🔄 Starting sendpastdms command...")
+        
         # Get the target user instead of channel
+        print(f"Looking for user with ID: {TARGET_USER_ID}")
         target_user = bot.get_user(TARGET_USER_ID)
-        print(f"Target user: {target_user}")
+        print(f"Target user found: {target_user}")
+        
+        if not target_user:
+            print("Target user not found, trying to fetch...")
+            try:
+                target_user = await bot.fetch_user(TARGET_USER_ID)
+                print(f"Target user fetched: {target_user}")
+            except Exception as e:
+                print(f"Failed to fetch user: {e}")
+                await ctx.send(f"❌ target user not found (ID: {TARGET_USER_ID})")
+                return
 
         if not stored_dms:
-            await ctx.send("no messages stored")
+            await ctx.send("❌ no messages stored")
             print("No messages stored")
             return
 
-        if not target_user:
-            await ctx.send(f"target user not found (ID: {TARGET_USER_ID})")
-            print(f"User {TARGET_USER_ID} not found")
-            return
-
-        await ctx.send(f"sending {len(stored_dms)} messages to {target_user.mention}")
+        await ctx.send(f"📤 Found {len(stored_dms)} messages. Sending to {target_user}...")
         print(f"Starting to send {len(stored_dms)} messages to {target_user}")
 
         sent_count = 0
@@ -75,7 +85,7 @@ async def sendpastdms(ctx):
 
         for i, dm in enumerate(stored_dms):
             try:
-                print(f"Sending message {i+1}/{len(stored_dms)}")
+                print(f"Processing message {i+1}/{len(stored_dms)}")
                 
                 # Handle very long messages by truncating them
                 content = dm["content"] if dm["content"] else "No content"
@@ -83,36 +93,38 @@ async def sendpastdms(ctx):
                     content = content[:4093] + "..."
                 
                 embed = discord.Embed(
-                    title="DM Message",
+                    title=f"DM Message #{i+1}",
                     description=content,
                     color=0x2f3136
                 )
                 embed.set_footer(text=f"From: {dm['author']}")
                 
+                print(f"Attempting to send message {i+1} to {target_user}")
                 # Send to the target user via DM
                 await target_user.send(embed=embed)
                 sent_count += 1
-                print(f"Successfully sent message {i+1}")
+                print(f"✅ Successfully sent message {i+1}")
                 
                 # Add a small delay to avoid rate limiting
-                if i % 8 == 0 and i > 0:  # Every 8 messages (DM rate limit is stricter)
-                    await asyncio.sleep(2)
+                if i % 5 == 0 and i > 0:  # Every 5 messages
+                    print("Rate limiting pause...")
+                    await asyncio.sleep(1)
                     
             except discord.HTTPException as e:
-                print(f"HTTP error sending message {i+1}: {e}")
+                print(f"❌ HTTP error sending message {i+1}: {e}")
                 failed_count += 1
                 continue
-            except discord.Forbidden:
-                print(f"Cannot DM target user - they may have DMs disabled")
-                await ctx.send("❌ Cannot send DMs to target user - they may have DMs disabled or blocked the bot")
+            except discord.Forbidden as e:
+                print(f"❌ Forbidden error sending message {i+1}: {e}")
+                await ctx.send(f"❌ Cannot send DMs to {target_user} - they may have DMs disabled or blocked the bot")
                 return
             except Exception as e:
-                print(f"Unexpected error sending message {i+1}: {e}")
+                print(f"❌ Unexpected error sending message {i+1}: {e}")
                 failed_count += 1
                 continue
 
         # Send summary of results
-        summary_msg = f"done! sent {sent_count}/{len(stored_dms)} messages to {target_user.mention}"
+        summary_msg = f"✅ Done! Sent {sent_count}/{len(stored_dms)} messages to {target_user}"
         if failed_count > 0:
             summary_msg += f" ({failed_count} failed)"
         
@@ -120,8 +132,43 @@ async def sendpastdms(ctx):
         print(summary_msg)
         
     except Exception as e:
-        print(f"Error in sendpastdms command: {e}")
-        await ctx.send(f"error occurred: {str(e)}")
+        print(f"❌ Critical error in sendpastdms command: {e}")
+        import traceback
+        traceback.print_exc()
+        await ctx.send(f"❌ Critical error occurred: {str(e)}")
+
+# Add a simple debug command to test basic functionality
+@bot.command()
+async def debug(ctx):
+    """Debug command to test basic bot functionality"""
+    print(f"Debug command called by {ctx.author}")
+    
+    embed = discord.Embed(title="Debug Info", color=0x00ff00)
+    embed.add_field(name="Bot User", value=str(bot.user), inline=False)
+    embed.add_field(name="Stored DMs", value=str(len(stored_dms)), inline=False)
+    embed.add_field(name="Target User ID", value=str(TARGET_USER_ID), inline=False)
+    
+    # Try to get target user
+    target_user = bot.get_user(TARGET_USER_ID)
+    if target_user:
+        embed.add_field(name="Target User Found", value=f"✅ {target_user}", inline=False)
+    else:
+        embed.add_field(name="Target User Found", value="❌ Not found", inline=False)
+    
+    await ctx.send(embed=embed)
+    print("Debug command completed")
+
+# Command to manually add a test DM
+@bot.command()
+async def addtestdm(ctx):
+    """Add a test DM to the stored messages"""
+    stored_dms.append({
+        "author": f"Test User (123456789)",
+        "content": "This is a test message",
+        "user_id": 123456789
+    })
+    await ctx.send(f"✅ Added test DM. Total stored: {len(stored_dms)}")
+    print(f"Test DM added. Total stored: {len(stored_dms)}")
 
 # Add a simple test command to verify bot is responding
 @bot.command()
