@@ -1,23 +1,26 @@
 import discord
 from discord.ext import commands
 import asyncio
+import os
+from dotenv import load_dotenv
 
-# Configuration - PUT YOUR BOT TOKEN HERE
+# Load token from .env
+load_dotenv()
+BOT_TOKEN = os.getenv("DISCORD_TOKEN")
+
+# Configuration
 TARGET_ROLE_ID = 1382280238842515587
 TARGET_CHANNEL_ID = 1383802708024365238
-BOT_TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"  # Replace with your actual bot token
 
 # Set up intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.dm_messages = True
 intents.guilds = True
-intents.members = True  # Needed to access member list
+intents.members = True
 
 # Create bot instance
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Track users who have already messaged in the target channel
 users_who_messaged = set()
 
 @bot.event
@@ -26,7 +29,6 @@ async def on_ready():
     try:
         channel = bot.get_channel(TARGET_CHANNEL_ID)
         if channel:
-            print('loading messages...')
             async for message in channel.history(limit=100):
                 if not message.author.bot:
                     users_who_messaged.add(message.author.id)
@@ -166,11 +168,11 @@ async def on_error(event, *args, **kwargs):
 async def on_command_error(ctx, error):
     print(f'cmd error: {error}')
 
+# Start bot
 if __name__ == '__main__':
-    print("Checking bot token...")
-    if BOT_TOKEN and BOT_TOKEN != "PUT_YOUR_BOT_TOKEN_HERE":
-        print(f"Token found: {BOT_TOKEN[:10]}...")
-        print("Starting bot...")
+    print("checking token...")
+    if BOT_TOKEN:
+        print(f"token found: {BOT_TOKEN[:10]}...")
         try:
             bot.run(BOT_TOKEN)
         except discord.LoginFailure:
@@ -180,4 +182,4 @@ if __name__ == '__main__':
         except Exception as e:
             print(f'bot error: {e}')
     else:
-        print("token not set")
+        print("token not found in .env")
