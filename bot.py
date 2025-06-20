@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-import logging
 from dotenv import load_dotenv
 import os
 
@@ -13,10 +12,8 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-OWNER_ID = 728201873366056992
 TARGET_CHANNEL_ID = 1383802708024365238
 
-# Store DMs while the bot is running
 stored_dms = []
 
 @bot.event
@@ -29,6 +26,7 @@ async def on_message(message):
         return
 
     if isinstance(message.channel, discord.DMChannel):
+        print(f"got dm from {message.author}: {message.content}")
         stored_dms.append({
             "author": f"{message.author} ({message.author.id})",
             "content": message.content
@@ -38,7 +36,6 @@ async def on_message(message):
     await bot.process_commands(message)
 
 @bot.command()
-@commands.has_permissions(administrator=True)
 async def sendpastdms(ctx):
     channel = bot.get_channel(TARGET_CHANNEL_ID)
 
@@ -59,9 +56,6 @@ async def sendpastdms(ctx):
             color=0x2f3136
         )
         embed.set_footer(text=dm["author"])
-        try:
-            await channel.send(embed=embed)
-        except Exception as e:
-            print(f"error sending dm: {e}")
+        await channel.send(embed=embed)
 
     await ctx.send("done")
