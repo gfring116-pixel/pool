@@ -1306,7 +1306,7 @@ async def send_battle_notifications():
         # Create the embed message (without link fields)
         embed = discord.Embed(
             title='🔥 Battle Alert!',
-            description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
+            description=f"There will be a battle happening later today at {BATTLE_TIMESTAMP}!",
             color=0xFF4444,
             timestamp=discord.utils.utcnow()
         )
@@ -1395,7 +1395,7 @@ async def test_battle_command(ctx):
     # Create the embed message (without link fields)
     embed = discord.Embed(
         title='🔥 Battle Alert! (TEST)',
-        description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
+        description=f"There will be a battle happening later today at {BATTLE_TIMESTAMP}!",
         color=0xFF4444,
         timestamp=discord.utils.utcnow()
     )
