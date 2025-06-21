@@ -1016,23 +1016,32 @@ async def on_disconnect():
     await save_user_data()
 
 # Run the bot
-if __name__ == '__main__':
+async def main():
+    """Main function to run the bot"""
     # Load existing data on startup
-    asyncio.get_event_loop().run_until_complete(load_user_data())
+    await load_user_data()
     
     # Get bot token from environment variable
     bot_token = os.getenv('DISCORD_BOT_TOKEN')
     
     if not bot_token:
         print('Error: DISCORD_BOT_TOKEN environment variable not set')
-        exit(1)
+        return
     
     try:
-        bot.run(bot_token)
+        await bot.start(bot_token)
     except discord.LoginFailure:
         print('Error: Invalid bot token')
     except Exception as e:
         print(f'Error starting bot: {e}')
     finally:
         # Save data on exit
-        asyncio.get_event_loop().run_until_complete(save_user_data())
+        await save_user_data()
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print('\nBot stopped by user')
+    except Exception as e:
+        print(f'Fatal error: {e}')
