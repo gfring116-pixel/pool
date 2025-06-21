@@ -120,7 +120,7 @@ class TargetSelectionView(discord.ui.View):
         self.session.stage = 'awaiting_role_id'
         self.session.update_activity()
 
-    @discord.ui.button(label='Select by Mentions', style=discord.ButtonStyle.secondary, emoji='@')
+    @discord.ui.button(label='Select by Mentions', style=discord.ButtonStyle.secondary, emoji='👤')
     async def select_by_mentions(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
             await interaction.response.send_message('This is not your session.', ephemeral=True)
