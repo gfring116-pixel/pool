@@ -1022,7 +1022,7 @@ async def main():
     await load_user_data()
     
     # Get bot token from environment variable
-    bot_token = os.getenv('DISCORD_BOT_TOKEN')
+    bot_token = os.getenv('DISCORD_TOKEN')
     
     if not bot_token:
         print('Error: DISCORD_BOT_TOKEN environment variable not set')
