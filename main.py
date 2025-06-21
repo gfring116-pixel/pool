@@ -1254,6 +1254,13 @@ async def test_command(ctx):
     
     await ctx.send('all good')
 
+# Configuration
+TARGET_ROLE_ID = 1382280238842515587
+GUILD_ID = 1122152849833459842  # Your server ID
+EVENT_LINK = 'https://discord.com/events/1122152849833459842/1384531945312227389'
+GAME_LINK = 'https://www.roblox.com/games/13550599465/Trenches'
+BATTLE_TIMESTAMP = '<t:1750507200:t>'  # This will show in user's timezone
+
 async def send_battle_notifications():
     """Send battle notifications to all users with the target role"""
     try:
