@@ -22,11 +22,6 @@ EVENT_LINK = 'https://discord.com/events/1122152849833459842/1384531945312227389
 GAME_LINK = 'https://www.roblox.com/games/13550599465/Trenches'
 BATTLE_TIMESTAMP = '<t:1750507200:t>'  # This will show in user's timezone
 
-@bot.event
-async def on_ready():
-    print(f'bot ready: {bot.user}')
-    print(f'guilds: {len(bot.guilds)}')
-
 async def send_battle_notifications():
     """Send battle notifications to all users with the target role"""
     try:
@@ -52,7 +47,7 @@ async def send_battle_notifications():
         # Create the embed message
         embed = discord.Embed(
             title='🔥 Battle Alert!',
-            description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
+            description=f"There's a battle happening today at {BATTLE_TIMESTAMP}! (this time is converted to your own time)",
             color=0xFF4444,
             timestamp=discord.utils.utcnow()
         )
@@ -144,7 +139,7 @@ async def test_battle_command(ctx):
     # Create the embed message
     embed = discord.Embed(
         title='🔥 Battle Alert! (TEST)',
-        description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
+        description=f"There's a battle happening today at {BATTLE_TIMESTAMP}! (this time is converted to your own time)",
         color=0xFF4444,
         timestamp=discord.utils.utcnow()
     )
