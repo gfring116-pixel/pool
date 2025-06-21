@@ -61,7 +61,7 @@ class TargetSelectionView(discord.ui.View):
         await interaction.response.send_message('Enter role ID:', ephemeral=True)
         self.session.stage = 'awaiting_role_id'
 
-    @discord.ui.button(label='Mentioned Users', style=discord.ButtonStyle.secondary, emoji='@')
+    @discord.ui.button(label='Mentioned Users', style=discord.ButtonStyle.secondary, emoji='📝')
     async def select_mentions(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
             await interaction.response.send_message('Not your session', ephemeral=True)
@@ -70,7 +70,7 @@ class TargetSelectionView(discord.ui.View):
         await interaction.response.send_message('Mention users in next message:', ephemeral=True)
         self.session.stage = 'awaiting_mentions'
 
-    @discord.ui.button(label='Custom List', style=discord.ButtonStyle.success, emoji='📝')
+    @discord.ui.button(label='Custom List', style=discord.ButtonStyle.success, emoji='📋')
     async def select_custom(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
             await interaction.response.send_message('Not your session', ephemeral=True)
@@ -137,15 +137,15 @@ class BatchSettingsView(discord.ui.View):
         super().__init__(timeout=600)
         self.session = session
 
-    @discord.ui.button(label='Small (5)', style=discord.ButtonStyle.secondary, emoji='🔢')
+    @discord.ui.button(label='Small (5)', style=discord.ButtonStyle.secondary, emoji='📊')
     async def small_batch(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_batch_size(interaction, 5)
 
-    @discord.ui.button(label='Medium (10)', style=discord.ButtonStyle.primary, emoji='🔢')
+    @discord.ui.button(label='Medium (10)', style=discord.ButtonStyle.primary, emoji='📊')
     async def medium_batch(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_batch_size(interaction, 10)
 
-    @discord.ui.button(label='Large (20)', style=discord.ButtonStyle.success, emoji='🔢')
+    @discord.ui.button(label='Large (20)', style=discord.ButtonStyle.success, emoji='📊')
     async def large_batch(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_batch_size(interaction, 20)
 
@@ -170,15 +170,15 @@ class DelaySettingsView(discord.ui.View):
     async def no_delay(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_delay(interaction, 0)
 
-    @discord.ui.button(label='1 Second', style=discord.ButtonStyle.primary, emoji='1️⃣')
+    @discord.ui.button(label='1 Second', style=discord.ButtonStyle.primary, emoji='⏱️')
     async def one_second(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_delay(interaction, 1)
 
-    @discord.ui.button(label='3 Seconds', style=discord.ButtonStyle.primary, emoji='3️⃣')
+    @discord.ui.button(label='3 Seconds', style=discord.ButtonStyle.primary, emoji='⏱️')
     async def three_seconds(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_delay(interaction, 3)
 
-    @discord.ui.button(label='5 Seconds', style=discord.ButtonStyle.success, emoji='5️⃣')
+    @discord.ui.button(label='5 Seconds', style=discord.ButtonStyle.success, emoji='⏱️')
     async def five_seconds(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_delay(interaction, 5)
 
