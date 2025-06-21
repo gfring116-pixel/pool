@@ -1,247 +1,266 @@
 import discord
 from discord.ext import commands
 import asyncio
+import logging
 import os
-from dotenv import load_dotenv
+import re
 
-# Load token from .env
-load_dotenv()
-BOT_TOKEN = os.getenv("DISCORD_TOKEN")
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
-# Configuration
-TARGET_ROLE_ID = 1382280238842515587
-TARGET_CHANNEL_ID = 1383802708024365238
-
-# Set up intents
+# Bot configuration
 intents = discord.Intents.default()
-intents.message_content = True
-intents.dm_messages = True
 intents.guilds = True
 intents.members = True
+intents.message_content = True
 
-# Create bot instance
 bot = commands.Bot(command_prefix='!', intents=intents)
-users_who_messaged = set()
+
+# Store pending messages
+pending_messages = {}
 
 @bot.event
 async def on_ready():
-    print(f'Bot is ready! Logged in as {bot.user}')
-    try:
-        channel = bot.get_channel(TARGET_CHANNEL_ID)
-        if channel:
-            async for message in channel.history(limit=100):
-                if not message.author.bot:
-                    users_who_messaged.add(message.author.id)
-            print(f'loaded {len(users_who_messaged)} users')
-    except Exception as error:
-        print(f'load error: {error}')
+    print(f'bot ready: {bot.user}')
+    print(f'guilds: {len(bot.guilds)}')
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    if message.channel.id == TARGET_CHANNEL_ID:
-        users_who_messaged.add(message.author.id)
-    await bot.process_commands(message)
+class DesignView(discord.ui.View):
+    def __init__(self, user_id, targets, message_content):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.user_id = user_id
+        self.targets = targets
+        self.message_content = message_content
+        self.selected_design = None
 
-@bot.command(name='dm_users')
-async def dm_users_command(ctx):
-    print(f"dm_users command called by {ctx.author} in {ctx.channel}")
-    
-    if isinstance(ctx.channel, discord.DMChannel):
-        await ctx.reply("no dm commands")
-        return
-
-    # Add permission check - only allow certain users or roles to use this command
-    # Uncomment and modify as needed:
-    # if not ctx.author.guild_permissions.administrator:
-    #     await ctx.reply("You don't have permission to use this command")
-    #     return
-
-    try:
-        await ctx.reply("starting")
-        print("Sent 'starting' message")
-    except Exception as e:
-        print(f"Failed to send 'starting' message: {e}")
-        return
-
-    users_to_dm = []
-    total_with_role = 0
-    successful_dms = 0
-    failed_dms = 0
-
-    print(f"Checking {len(bot.guilds)} guilds for role {TARGET_ROLE_ID}")
-    
-    for guild in bot.guilds:
-        try:
-            target_role = guild.get_role(TARGET_ROLE_ID)
-            if not target_role:
-                print(f"Role {TARGET_ROLE_ID} not found in guild {guild.name}")
-                continue
-            
-            print(f"Found role {target_role.name} with {len(target_role.members)} members")
-            
-            for member in target_role.members:
-                total_with_role += 1
-                if member.id not in users_who_messaged:
-                    users_to_dm.append(member)
-                    print(f"Will DM {member.display_name} ({member.id})")
-                else:
-                    print(f"Skipping {member.display_name} - already messaged")
-                    
-        except Exception as error:
-            print(f'guild check error: {error}')
-            continue
-
-    print(f"Found {len(users_to_dm)} users to DM")
-
-    for member in users_to_dm:
-        try:
-            await send_redirect_message(member)
-            successful_dms += 1
-            print(f"Successfully DMed {member.display_name}")
-            await asyncio.sleep(1)  # Rate limiting
-        except Exception as error:
-            failed_dms += 1
-            print(f'dm fail for {member.display_name}: {error}')
-
-    summary = f"""complete
-role users: {total_with_role}
-already messaged: {total_with_role - len(users_to_dm)}
-dm sent: {successful_dms}
-failed: {failed_dms}"""
-    
-    try:
-        await ctx.send(summary)  # Changed from followup.send to send
-        print("Sent summary message")
-    except Exception as e:
-        print(f"Failed to send summary: {e}")
-
-async def send_redirect_message(user):
-    try:
-        redirect_message = f"""Hello! The DM the bot feature doesn't work, so if you haven't sent a message to <#{TARGET_CHANNEL_ID}> already, you should.
-
-Please choose one of these options:
-
-**Option 1:** Visit <#{TARGET_CHANNEL_ID}> and type your message there.
-
-**Option 2:** If you're very busy as the instructions mentioned, don't leave! Instead, add the user ".iloh." and tell them your concern.
-
-Thank you for understanding!"""
-        await user.send(redirect_message)
-    except discord.Forbidden:
-        print(f'dm blocked for {user}')
-        raise
-    except Exception as error:
-        print(f'dm error for {user}: {error}')
-        raise
-
-@bot.command(name='test')
-async def test_dm(ctx):
-    print(f"test command called by {ctx.author}")
-    
-    if isinstance(ctx.channel, discord.DMChannel):
-        return
-    
-    has_role = await check_user_role(ctx.author.id)
-    has_messaged = ctx.author.id in users_who_messaged
-    status_message = f"role {has_role} msg {has_messaged}"
-    
-    try:
-        await ctx.reply(status_message)
-        print(f"Sent test response: {status_message}")
+    @discord.ui.button(label='Simple Text', style=discord.ButtonStyle.secondary, emoji='📝')
+    async def simple_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
         
-        if has_role and not has_messaged:
-            await send_redirect_message(ctx.author)
-            print(f"Sent redirect message to {ctx.author}")
-    except Exception as e:
-        print(f"Error in test command: {e}")
+        self.selected_design = 'simple'
+        await self.show_preview(interaction)
 
-async def check_user_role(user_id):
-    try:
-        for guild in bot.guilds:
-            try:
-                member = guild.get_member(user_id)
-                if member is None:
-                    member = await guild.fetch_member(user_id)
-                if member:
-                    for role in member.roles:
-                        if role.id == TARGET_ROLE_ID:
-                            return True
-            except discord.NotFound:
-                continue
-            except Exception as error:
-                print(f'check role error: {error}')
-                continue
-        return False
-    except Exception as error:
-        print(f'role check fail: {error}')
-        return False
+    @discord.ui.button(label='Basic Embed', style=discord.ButtonStyle.primary, emoji='📋')
+    async def basic_embed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
+        
+        self.selected_design = 'basic'
+        await self.show_preview(interaction)
 
-@bot.command(name='stat')
-async def stats(ctx):
-    print(f"stat command called by {ctx.author}")
-    
-    if isinstance(ctx.channel, discord.DMChannel):
-        return
-    
-    try:
-        await ctx.reply(f'{len(users_who_messaged)} users have messaged')
-        print(f"Sent stats: {len(users_who_messaged)} users")
-    except Exception as e:
-        print(f"Error in stats command: {e}")
+    @discord.ui.button(label='Fancy Embed', style=discord.ButtonStyle.success, emoji='✨')
+    async def fancy_embed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
+        
+        self.selected_design = 'fancy'
+        await self.show_preview(interaction)
 
-@bot.command(name='refresh')
-async def refresh_users(ctx):
-    print(f"refresh command called by {ctx.author}")
-    
-    if isinstance(ctx.channel, discord.DMChannel):
-        return
-    
-    users_who_messaged.clear()
-    try:
-        channel = bot.get_channel(TARGET_CHANNEL_ID)
-        if channel:
-            async for message in channel.history(limit=100):
-                if not message.author.bot:
-                    users_who_messaged.add(message.author.id)
-            await ctx.reply(f'refreshed {len(users_who_messaged)} users')
-            print(f"Refreshed: {len(users_who_messaged)} users")
+    @discord.ui.button(label='Alert Style', style=discord.ButtonStyle.danger, emoji='🚨')
+    async def alert_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
+        
+        self.selected_design = 'alert'
+        await self.show_preview(interaction)
+
+    async def show_preview(self, interaction):
+        # Create the message based on selected design
+        message_data = self.create_message(self.selected_design, self.message_content)
+        
+        # Create confirmation view
+        confirm_view = ConfirmView(self.user_id, self.targets, message_data, self.selected_design)
+        
+        if message_data['type'] == 'text':
+            await interaction.response.edit_message(
+                content=f"preview ({self.selected_design}):\n\n{message_data['content']}\n\nsend this?",
+                embed=None,
+                view=confirm_view
+            )
         else:
-            await ctx.reply('channel not found')
-            print("Target channel not found")
-    except Exception as error:
-        await ctx.reply(f'refresh failed: {error}')
-        print(f"Refresh error: {error}")
+            await interaction.response.edit_message(
+                content=f"preview ({self.selected_design}):\n\nsend this?",
+                embed=message_data['embed'],
+                view=confirm_view
+            )
 
-@bot.event
-async def on_error(event, *args, **kwargs):
-    print(f'error in {event}: {args}, {kwargs}')
+    def create_message(self, design, content):
+        if design == 'simple':
+            return {'type': 'text', 'content': content}
+        
+        elif design == 'basic':
+            embed = discord.Embed(
+                description=content,
+                color=0x5865F2
+            )
+            return {'type': 'embed', 'embed': embed}
+        
+        elif design == 'fancy':
+            embed = discord.Embed(
+                title='📢 Message',
+                description=content,
+                color=0x00D4AA,
+                timestamp=discord.utils.utcnow()
+            )
+            embed.set_footer(text='Message System')
+            return {'type': 'embed', 'embed': embed}
+        
+        elif design == 'alert':
+            embed = discord.Embed(
+                title='🚨 Important Notice',
+                description=content,
+                color=0xFF4444,
+                timestamp=discord.utils.utcnow()
+            )
+            embed.set_footer(text='Alert System')
+            return {'type': 'embed', 'embed': embed}
+
+class ConfirmView(discord.ui.View):
+    def __init__(self, user_id, targets, message_data, design):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.targets = targets
+        self.message_data = message_data
+        self.design = design
+
+    @discord.ui.button(label='Send', style=discord.ButtonStyle.success, emoji='✅')
+    async def confirm_send(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
+        
+        await interaction.response.edit_message(content='sending messages...', embed=None, view=None)
+        
+        success, fail = await self.send_messages()
+        
+        await interaction.followup.send(f'done. sent: {success} failed: {fail}')
+
+    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.danger, emoji='❌')
+    async def cancel_send(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
+        
+        await interaction.response.edit_message(content='cancelled', embed=None, view=None)
+
+    @discord.ui.button(label='Change Design', style=discord.ButtonStyle.secondary, emoji='🎨')
+    async def change_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message('not your command', ephemeral=True)
+            return
+        
+        # Extract original message content
+        if self.message_data['type'] == 'text':
+            original_content = self.message_data['content']
+        else:
+            original_content = self.message_data['embed'].description
+        
+        design_view = DesignView(self.user_id, self.targets, original_content)
+        await interaction.response.edit_message(
+            content='choose design:',
+            embed=None,
+            view=design_view
+        )
+
+    async def send_messages(self):
+        success_count = 0
+        fail_count = 0
+        
+        for target in self.targets:
+            try:
+                if self.message_data['type'] == 'text':
+                    await target.send(self.message_data['content'])
+                else:
+                    await target.send(embed=self.message_data['embed'])
+                
+                print(f'sent message to {target.display_name}')
+                success_count += 1
+                await asyncio.sleep(1)  # Rate limiting
+                
+            except discord.Forbidden:
+                print(f'dms disabled: {target.display_name}')
+                fail_count += 1
+            except Exception as e:
+                print(f'error {target.display_name}: {e}')
+                fail_count += 1
+        
+        print(f'summary: sent {success_count} failed {fail_count} total {len(self.targets)}')
+        return success_count, fail_count
+
+@bot.command(name='send')
+async def send_message(ctx, *, args):
+    """Send a message to role members or mentioned users"""
+    # Authorization check
+    authorized_users = [728201873366056992]
+    
+    if ctx.author.id not in authorized_users:
+        await ctx.send('not authorized')
+        return
+    
+    # Parse the command arguments
+    parts = args.split(' ', 1)
+    if len(parts) < 2:
+        await ctx.send('usage: !send <role_id/mentions> <message>')
+        return
+    
+    target_arg, message_content = parts
+    
+    # Find targets (role members or mentioned users)
+    targets = []
+    
+    # Check if it's a role ID
+    if target_arg.isdigit():
+        role_id = int(target_arg)
+        role = ctx.guild.get_role(role_id)
+        if role:
+            targets = list(role.members)
+            print(f'found role: {role.name} with {len(targets)} members')
+        else:
+            await ctx.send('role not found')
+            return
+    
+    # Check for mentions in the original message
+    elif ctx.message.mentions:
+        targets = ctx.message.mentions
+        print(f'found {len(targets)} mentioned users')
+    
+    else:
+        await ctx.send('no valid targets found. use role id or mention users')
+        return
+    
+    if not targets:
+        await ctx.send('no targets found')
+        return
+    
+    # Show design selection
+    design_view = DesignView(ctx.author.id, targets, message_content)
+    await ctx.send('choose design:', view=design_view)
+
+@bot.command(name='testsend')
+async def test_send(ctx, *, message_content):
+    """Test send message to yourself only"""
+    authorized_users = [728201873366056992]
+    
+    if ctx.author.id not in authorized_users:
+        await ctx.send('not authorized')
+        return
+    
+    # Target yourself
+    targets = [ctx.author]
+    
+    # Show design selection
+    design_view = DesignView(ctx.author.id, targets, message_content)
+    await ctx.send('choose design:', view=design_view)
 
 @bot.event
 async def on_command_error(ctx, error):
-    print(f'cmd error in {ctx.command}: {error}')
     if isinstance(error, commands.CommandNotFound):
-        print(f"Command not found: {ctx.message.content}")
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.reply("You don't have permission to use this command")
-    elif isinstance(error, commands.BotMissingPermissions):
-        await ctx.reply("I don't have the required permissions")
-    else:
-        await ctx.reply(f"An error occurred: {error}")
+        return
+    print(f'command error: {error}')
 
-# Start bot
 if __name__ == '__main__':
-    print("checking token...")
-    if BOT_TOKEN:
-        print(f"token found: {BOT_TOKEN[:10]}...")
-        try:
-            bot.run(BOT_TOKEN)
-        except discord.LoginFailure:
-            print("invalid token")
-        except discord.HTTPException as e:
-            print(f"http error: {e}")
-        except Exception as e:
-            print(f'bot error: {e}')
-    else:
-        print("token not found in .env")
+    bot.run(os.getenv('DISCORD_TOKEN'))
