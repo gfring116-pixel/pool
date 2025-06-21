@@ -1261,6 +1261,26 @@ EVENT_LINK = 'https://discord.com/events/1122152849833459842/1384531945312227389
 GAME_LINK = 'https://www.roblox.com/games/13550599465/Trenches'
 BATTLE_TIMESTAMP = '<t:1750507200:t>'  # This will show in user's timezone
 
+class BattleButtons(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Buttons won't timeout
+        
+        # Add Game Link Button
+        game_button = discord.ui.Button(
+            label='🎮 Join Game',
+            style=discord.ButtonStyle.primary,
+            url=GAME_LINK
+        )
+        self.add_item(game_button)
+        
+        # Add Event Link Button  
+        event_button = discord.ui.Button(
+            label='📅 View Event',
+            style=discord.ButtonStyle.secondary,
+            url=EVENT_LINK
+        )
+        self.add_item(event_button)
+
 async def send_battle_notifications():
     """Send battle notifications to all users with the target role"""
     try:
@@ -1283,7 +1303,7 @@ async def send_battle_notifications():
         
         print(f'found role: {target_role.name} with {len(target_role.members)} members')
         
-        # Create the embed message
+        # Create the embed message (without link fields)
         embed = discord.Embed(
             title='🔥 Battle Alert!',
             description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
@@ -1292,14 +1312,8 @@ async def send_battle_notifications():
         )
         
         embed.add_field(
-            name='🎮 Game Location',
-            value=f'[Trenches]({GAME_LINK})',
-            inline=False
-        )
-        
-        embed.add_field(
             name='✅ Can Attend?',
-            value=f'Press "Interested" on [this event]({EVENT_LINK}) and ping <@.iloh>',
+            value='Press "Interested" on the event and ping <@.iloh>',
             inline=False
         )
         
@@ -1311,13 +1325,16 @@ async def send_battle_notifications():
         
         embed.set_footer(text='Battle Notification System')
         
+        # Create the button view
+        view = BattleButtons()
+        
         success_count = 0
         fail_count = 0
         
         # Send DM to each member with the role
         for member in target_role.members:
             try:
-                await member.send(embed=embed)
+                await member.send(embed=embed, view=view)
                 print(f'sent dm to {member.display_name}')
                 success_count += 1
                 
@@ -1375,7 +1392,7 @@ async def test_battle_command(ctx):
         await ctx.send('user not found')
         return
     
-    # Create the embed message
+    # Create the embed message (without link fields)
     embed = discord.Embed(
         title='🔥 Battle Alert! (TEST)',
         description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
@@ -1384,14 +1401,8 @@ async def test_battle_command(ctx):
     )
     
     embed.add_field(
-        name='🎮 Game Location',
-        value=f'[Trenches]({GAME_LINK})',
-        inline=False
-    )
-    
-    embed.add_field(
         name='✅ Can Attend?',
-        value=f'Press "Interested" on [this event]({EVENT_LINK}) and ping <@.iloh>',
+        value='Press "Interested" on the event and ping <@.iloh>',
         inline=False
     )
     
@@ -1403,8 +1414,11 @@ async def test_battle_command(ctx):
     
     embed.set_footer(text='Battle Notification System - TEST MESSAGE')
     
+    # Create the button view
+    view = BattleButtons()
+    
     try:
-        await user.send(embed=embed)
+        await user.send(embed=embed, view=view)
         await ctx.send('test sent')
         print(f'test dm sent to {user.name}')
     except discord.Forbidden:
