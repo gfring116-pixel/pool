@@ -731,7 +731,8 @@ async def send_message(ctx, *, args=None):
     
     # Check for existing active session
     existing_session = None
-  @bot.command(name='send')
+    
+@bot.command(name='send')
 async def send_message(ctx, *, args=None):
     """Start the complex message sending process"""
     # Authorization check
