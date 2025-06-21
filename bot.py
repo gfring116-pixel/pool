@@ -1,109 +1,199 @@
 import discord
 from discord.ext import commands
-from dotenv import load_dotenv
-import os
 import asyncio
+import logging
+import os
 
-load_dotenv()
-token = os.getenv('DISCORD_TOKEN')
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
+# Bot configuration
 intents = discord.Intents.default()
-intents.message_content = True
+intents.guilds = True
 intents.members = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-TARGET_CHANNEL_ID = 1383802708024365238
-
-stored_dms = []
+# Configuration
+TARGET_ROLE_ID = 1382280238842515587
+GUILD_ID = 1122152849833459842  # Your server ID
+EVENT_LINK = 'https://discord.com/events/1122152849833459842/1384531945312227389'
+GAME_LINK = 'https://www.roblox.com/games/13550599465/Trenches'
+BATTLE_TIMESTAMP = '<t:1750507200:t>'  # This will show in user's timezone
 
 @bot.event
 async def on_ready():
-    print(f'logged in as {bot.user}')
+    print(f'bot ready: {bot.user}')
+    print(f'guilds: {len(bot.guilds)}')
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    if isinstance(message.channel, discord.DMChannel):
-        print(f"got dm from {message.author}: {message.content}")
-        stored_dms.append({
-            "author": f"{message.author} ({message.author.id})",
-            "content": message.content
-        })
-        try:
-            await message.channel.send("message received")
-        except Exception as e:
-            print(f"failed to send confirmation to {message.author}: {e}")
-
-    await bot.process_commands(message)
-
-@bot.command()
-async def sendpastdms(ctx):
-    channel = bot.get_channel(TARGET_CHANNEL_ID)
-
-    if not stored_dms:
-        await ctx.send("no messages stored")
-        return
-
-    if not channel:
-        await ctx.send("target channel not found")
-        return
-
-    await ctx.send(f"sending {len(stored_dms)} messages to <#{TARGET_CHANNEL_ID}>")
-
-    sent_count = 0
-    failed_count = 0
-
-    for i, dm in enumerate(stored_dms):
-        try:
-            # Handle very long messages by truncating them
-            content = dm["content"]
-            if len(content) > 4096:  # Discord embed description limit
-                content = content[:4093] + "..."
-            
-            embed = discord.Embed(
-                title="dm",
-                description=content,
-                color=0x2f3136
-            )
-            embed.set_footer(text=dm["author"])
-            
-            await channel.send(embed=embed)
-            sent_count += 1
-            
-            # Add a small delay to avoid rate limiting
-            if i % 5 == 0 and i > 0:  # Every 5 messages
+async def send_battle_notifications():
+    """Send battle notifications to all users with the target role"""
+    try:
+        print('starting notifications')
+        
+        # Get the guild
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            print('guild not found')
+            return
+        
+        # Fetch all members to ensure we have complete member data
+        await guild.chunk()
+        
+        # Find the target role
+        target_role = guild.get_role(TARGET_ROLE_ID)
+        if not target_role:
+            print('role not found')
+            return
+        
+        print(f'found role: {target_role.name} with {len(target_role.members)} members')
+        
+        # Create the embed message
+        embed = discord.Embed(
+            title='🔥 Battle Alert!',
+            description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
+            color=0xFF4444,
+            timestamp=discord.utils.utcnow()
+        )
+        
+        embed.add_field(
+            name='🎮 Game Location',
+            value=f'[Trenches]({GAME_LINK})',
+            inline=False
+        )
+        
+        embed.add_field(
+            name='✅ Can Attend?',
+            value=f'Press "Interested" on [this event]({EVENT_LINK}) and ping <@.iloh>',
+            inline=False
+        )
+        
+        embed.add_field(
+            name='❌ Cannot Attend?',
+            value='Ping <@.iloh> and let them know you cannot attend (no reason needed)',
+            inline=False
+        )
+        
+        embed.set_footer(text='Battle Notification System')
+        
+        success_count = 0
+        fail_count = 0
+        
+        # Send DM to each member with the role
+        for member in target_role.members:
+            try:
+                await member.send(embed=embed)
+                print(f'sent dm to {member.display_name}')
+                success_count += 1
+                
+                # Add a small delay to avoid rate limiting
                 await asyncio.sleep(1)
                 
-        except discord.HTTPException as e:
-            print(f"failed to send message {i+1}: {e}")
-            failed_count += 1
-            # Continue to next message instead of stopping
-            continue
-        except Exception as e:
-            print(f"unexpected error sending message {i+1}: {e}")
-            failed_count += 1
-            continue
+            except discord.Forbidden:
+                print(f'dms disabled: {member.display_name}')
+                fail_count += 1
+            except discord.HTTPException as e:
+                print(f'http error {member.display_name}: {e}')
+                fail_count += 1
+            except Exception as e:
+                print(f'error {member.display_name}: {e}')
+                fail_count += 1
+        
+        print(f'summary: sent {success_count} failed {fail_count} total {len(target_role.members)}')
+        
+        return success_count, fail_count
+        
+    except Exception as e:
+        print(f'error in notifications: {e}')
+        return 0, 0
 
-    # Send summary of results
-    summary_msg = f"done! sent {sent_count}/{len(stored_dms)} messages"
-    if failed_count > 0:
-        summary_msg += f" ({failed_count} failed)"
+@bot.command(name='sendi')
+async def send_battle_command(ctx):
+    """Command to trigger battle notifications"""
+    # Add your user ID here for permission check
+    authorized_users = [728201873366056992]  # Your Discord user ID
     
-    await ctx.send(summary_msg)
+    if ctx.author.id not in authorized_users:
+        await ctx.send('not authorized')
+        return
+    
+    await ctx.send('sending notifications')
+    
+    success, fail = await send_battle_notifications()
+    
+    await ctx.send(f'done. sent: {success} failed: {fail}')
 
-@bot.command()
-async def cleardms(ctx):
-    """Clear all stored DMs"""
-    count = len(stored_dms)
-    stored_dms.clear()
-    await ctx.send(f"cleared {count} stored messages")
+@bot.command(name='testicle')
+async def test_battle_command(ctx):
+    """Test command to send battle notification to yourself only"""
+    # Add your user ID here for permission check
+    authorized_users = [728201873366056992]  # Your Discord user ID
+    
+    if ctx.author.id not in authorized_users:
+        await ctx.send('not authorized')
+        return
+    
+    # Get your user object
+    try:
+        user = await bot.fetch_user(728201873366056992)
+    except:
+        await ctx.send('user not found')
+        return
+    
+    # Create the embed message
+    embed = discord.Embed(
+        title='🔥 Battle Alert! (TEST)',
+        description=f"There's a battle happening today at {BATTLE_TIMESTAMP}!",
+        color=0xFF4444,
+        timestamp=discord.utils.utcnow()
+    )
+    
+    embed.add_field(
+        name='🎮 Game Location',
+        value=f'[Trenches]({GAME_LINK})',
+        inline=False
+    )
+    
+    embed.add_field(
+        name='✅ Can Attend?',
+        value=f'Press "Interested" on [this event]({EVENT_LINK}) and ping <@.iloh>',
+        inline=False
+    )
+    
+    embed.add_field(
+        name='❌ Cannot Attend?',
+        value='Ping <@.iloh> and let them know you cannot attend (no reason needed)',
+        inline=False
+    )
+    
+    embed.set_footer(text='Battle Notification System - TEST MESSAGE')
+    
+    try:
+        await user.send(embed=embed)
+        await ctx.send('test sent')
+        print(f'test dm sent to {user.name}')
+    except discord.Forbidden:
+        await ctx.send('dms disabled')
+        print('test dm failed: dms disabled')
 
-@bot.command()
-async def dmcount(ctx):
-    """Show how many DMs are stored"""
-    await ctx.send(f"currently storing {len(stored_dms)} messages")
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return  # Ignore unknown commands
+    print(f'command error: {error}')
 
-bot.run(token)
+# Alternative: Auto-run when bot starts (uncomment if needed)
+"""
+@bot.event
+async def on_ready():
+    print(f'✅ Bot is ready! Logged in as {bot.user}')
+    
+    # Wait a bit for everything to load, then send notifications
+    await asyncio.sleep(5)
+    await send_battle_notifications()
+"""
+
+if __name__ == '__main__':
+    # Get bot token from environment variable
+    bot.run(os.getenv('DISCORD_TOKEN'))
