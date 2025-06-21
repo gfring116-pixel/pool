@@ -969,7 +969,7 @@ async def system_info(ctx):
     await ctx.send(embed=embed)
 
 # test command
-@bot.command(name='test')
+@bot.command(name='t')
 async def test_command(ctx):
     """test if bot is working"""
     authorized_users = [728201873366056992]
