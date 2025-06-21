@@ -718,19 +718,6 @@ async def update_send_statistics(user_id, success, fail):
     stats['last_send'] = datetime.utcnow()
     
     print(f'updated stats for user {user_id}: {stats}')
-
-@bot.command(name='send')
-async def send_message(ctx, *, args=None):
-    """Start the complex message sending process"""
-    # Authorization check
-    authorized_users = [728201873366056992]
-    
-    if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
-        return
-    
-    # Check for existing active session
-    existing_session = None
     
 @bot.command(name='send')
 async def send_message(ctx, *, args=None):
