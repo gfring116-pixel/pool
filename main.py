@@ -982,7 +982,7 @@ async def on_disconnect():
 async def main():
     """Main function to run the bot"""
     # Load existing data on startup
-    await load_user_data()
+    await load_user_preferences()
     
     # Get bot token from environment variable
     bot_token = os.getenv('DISCORD_TOKEN')
