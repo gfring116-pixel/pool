@@ -315,27 +315,44 @@ def update_statistics(user_id, success, fail):
 async def on_ready():
     print(f'Bot ready: {bot.user}')
     print(f'Guilds: {len(bot.guilds)}')
+    print(f'Authorized User ID: {AUTHORIZED_USER}')
+    
+    # Sync slash commands if needed
+    try:
+        synced = await bot.tree.sync()
+        print(f'Synced {len(synced)} command(s)')
+    except Exception as e:
+        print(f'Failed to sync commands: {e}')
 
 @bot.command(name='send')
 async def send_message(ctx):
     """Start the message sending process"""
+    print(f'Command triggered by user: {ctx.author.id}')
+    print(f'Authorized user: {AUTHORIZED_USER}')
+    
     if ctx.author.id != AUTHORIZED_USER:
-        await ctx.send('Not authorized')
+        await ctx.send('❌ You are not authorized to use this command.')
         return
     
-    session = MessageSession(ctx.author.id, ctx.channel.id, ctx.guild.id)
-    active_sessions[session.session_id] = session
-    
-    embed = discord.Embed(
-        title='📨 Message Delivery System',
-        description=f'Session ID: `{session.session_id}`\nStep 1: Select message recipients',
-        color=0x5865F2,
-        timestamp=datetime.utcnow()
-    )
-    
-    view = TargetSelectionView(session)
-    await ctx.send(embed=embed, view=view)
-    session.stage = 'target_selection'
+    try:
+        session = MessageSession(ctx.author.id, ctx.channel.id, ctx.guild.id)
+        active_sessions[session.session_id] = session
+        
+        embed = discord.Embed(
+            title='📨 Message Delivery System',
+            description=f'Session ID: `{session.session_id}`\nStep 1: Select message recipients',
+            color=0x5865F2,
+            timestamp=datetime.utcnow()
+        )
+        
+        view = TargetSelectionView(session)
+        await ctx.send(embed=embed, view=view)
+        session.stage = 'target_selection'
+        print(f'Session created: {session.session_id}')
+        
+    except Exception as e:
+        print(f'Error in send command: {e}')
+        await ctx.send(f'❌ An error occurred: {e}')
 
 @bot.event
 async def on_message(message):
@@ -343,6 +360,10 @@ async def on_message(message):
     if message.author.bot:
         return
     
+    # Process commands first
+    await bot.process_commands(message)
+    
+    # Then handle session messages
     user_session = None
     for session in active_sessions.values():
         if session.user_id == message.author.id and session.channel_id == message.channel.id:
@@ -350,23 +371,26 @@ async def on_message(message):
             break
     
     if not user_session:
-        await bot.process_commands(message)
         return
     
     content = message.content.strip()
     stage = user_session.stage
+    
+    # Skip if message is a command
+    if content.startswith('!'):
+        return
     
     try:
         if stage == 'awaiting_role_id':
             role_id = int(content)
             role = message.guild.get_role(role_id)
             if not role:
-                await message.channel.send('Role not found, try again:')
+                await message.channel.send('❌ Role not found, try again:')
                 return
             
             members = [member for member in role.members if not member.bot]
             if not members:
-                await message.channel.send('No members in role, try again:')
+                await message.channel.send('❌ No members in role, try again:')
                 return
             
             user_session.data['targets'] = members
@@ -377,7 +401,7 @@ async def on_message(message):
         elif stage == 'awaiting_mentions':
             mentioned_users = [user for user in message.mentions if not user.bot]
             if not mentioned_users:
-                await message.channel.send('No valid users mentioned, try again:')
+                await message.channel.send('❌ No valid users mentioned, try again:')
                 return
             
             user_session.data['targets'] = mentioned_users
@@ -397,7 +421,7 @@ async def on_message(message):
                     continue
             
             if not users:
-                await message.channel.send('No valid users found, try again:')
+                await message.channel.send('❌ No valid users found, try again:')
                 return
             
             user_session.data['targets'] = users
@@ -407,7 +431,7 @@ async def on_message(message):
             
         elif stage in ['awaiting_message_content', 'awaiting_template_content']:
             if len(content) > 2000:
-                await message.channel.send('Message too long (max 2000 characters), try again:')
+                await message.channel.send('❌ Message too long (max 2000 characters), try again:')
                 return
             
             user_session.data['message_content'] = content
@@ -417,7 +441,7 @@ async def on_message(message):
         elif stage == 'awaiting_confirmation_code':
             expected_code = user_session.data.get('confirmation_code')
             if content != expected_code:
-                await message.channel.send(f'Incorrect code, expected: **{expected_code}**')
+                await message.channel.send(f'❌ Incorrect code, expected: **{expected_code}**')
                 return
             
             message_data = create_message_from_session(user_session)
@@ -433,19 +457,29 @@ async def on_message(message):
             user_session.stage = 'final_confirmation'
             
     except ValueError:
-        await message.channel.send('Invalid input format, try again:')
+        await message.channel.send('❌ Invalid input format, try again:')
     except Exception as e:
-        await message.channel.send(f'Error processing input: {e}')
+        print(f'Error in on_message: {e}')
+        await message.channel.send(f'❌ Error processing input: {e}')
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Handle command errors"""
+    if isinstance(error, commands.CommandNotFound):
+        return  # Ignore unknown commands
+    
+    print(f'Command error: {error}')
+    await ctx.send(f'❌ An error occurred: {error}')
 
 @bot.command(name='sessions')
 async def list_sessions(ctx):
     """List active sessions"""
     if ctx.author.id != AUTHORIZED_USER:
-        await ctx.send('Not authorized')
+        await ctx.send('❌ Not authorized')
         return
     
     if not active_sessions:
-        await ctx.send('No active sessions')
+        await ctx.send('📭 No active sessions')
         return
     
     embed = discord.Embed(title='📊 Active Sessions', color=0x5865F2)
@@ -463,11 +497,11 @@ async def list_sessions(ctx):
 async def show_stats(ctx):
     """Show user statistics"""
     if ctx.author.id != AUTHORIZED_USER:
-        await ctx.send('Not authorized')
+        await ctx.send('❌ Not authorized')
         return
     
     if ctx.author.id not in send_statistics:
-        await ctx.send('No statistics available')
+        await ctx.send('📊 No statistics available')
         return
     
     stats = send_statistics[ctx.author.id]
@@ -478,9 +512,21 @@ async def show_stats(ctx):
     
     await ctx.send(embed=embed)
 
+@bot.command(name='test')
+async def test_command(ctx):
+    """Test command to verify bot is working"""
+    if ctx.author.id != AUTHORIZED_USER:
+        await ctx.send('❌ Not authorized')
+        return
+    
+    await ctx.send('✅ Bot is working! Your user ID is: ' + str(ctx.author.id))
+
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN') or os.getenv('BOT_TOKEN')
     if not token:
         print("Error: No bot token found in environment variables!")
+        print("Please set either DISCORD_TOKEN or BOT_TOKEN environment variable")
         exit(1)
+    
+    print("Starting bot...")
     bot.run(token)
