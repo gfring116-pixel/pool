@@ -95,14 +95,14 @@ class MessageSession:
             'delay': 2,
             'confirmation_code': None
         }
-        self.created_at = datetime.utcnow()
-        self.last_activity = datetime.utcnow()
+        self.created_at = datetime.now(UTC)
+        self.last_activity = datetime.now(UTC)
 
     def update_activity(self):
-        self.last_activity = datetime.utcnow()
+        self.last_activity = datetime.now(UTC)
 
     def is_expired(self):
-        return datetime.utcnow() - self.last_activity > timedelta(minutes=15)
+        return datetime.now(UTC) - self.last_activity > timedelta(minutes=15)
 
 class TargetSelectionView(discord.ui.View):
     def __init__(self, session):
@@ -276,7 +276,7 @@ class FinalConfirmationView(discord.ui.View):
         embed = discord.Embed(
             title='📊 Delivery Complete',
             color=0x00FF00 if failed == 0 else 0xFFA500,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         embed.add_field(name='✅ Successful', value=str(success), inline=True)
         embed.add_field(name='❌ Failed', value=str(failed), inline=True)
@@ -315,7 +315,7 @@ async def create_message_from_session(session):
         embed = discord.Embed(
             description=content,
             color=0x5865F2,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         return {'type': 'embed', 'embed': embed}
     
@@ -324,7 +324,7 @@ async def create_message_from_session(session):
             title='📢 Message',
             description=content,
             color=0x00D4AA,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         embed.set_footer(text='Professional Message System')
         return {'type': 'embed', 'embed': embed}
@@ -334,7 +334,7 @@ async def create_message_from_session(session):
             title='🚨 Important Alert',
             description=content,
             color=0xFF4444,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(UTC)
         )
         embed.set_footer(text='Alert System')
         return {'type': 'embed', 'embed': embed}
@@ -405,7 +405,7 @@ async def update_send_statistics(user_id, success, fail):
     stats['total_sent'] += success
     stats['total_failed'] += fail
     stats['sessions_completed'] += 1
-    stats['last_send'] = datetime.utcnow()
+    stats['last_send'] = datetime.now(UTC)
 
 @bot.command(name='send')
 async def send_message(ctx):
@@ -449,7 +449,7 @@ async def send_message(ctx):
                    f'**Session ID:** `{session.session_id}`\n'
                    f'**Step 1:** Choose how to select message recipients',
         color=0x5865F2,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(UTC)
     )
     
     embed.set_footer(text='Session will expire in 15 minutes of inactivity')
@@ -646,7 +646,7 @@ async def handle_confirmation_code_input(message, session, code):
         title='📋 Final Summary',
         description='Please review your message settings before sending:',
         color=0x5865F2,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(UTC)
     )
     
     embed.add_field(name='👥 Targets', value=str(targets_count), inline=True)
@@ -672,7 +672,7 @@ async def handle_confirmation_code_input(message, session, code):
 
 async def cleanup_expired_sessions():
     """Clean up expired sessions"""
-    current_time = datetime.utcnow()
+    current_time = datetime.now(UTC)
     expired_sessions = []
     
     for session_id, session in list(active_sessions.items()):
@@ -701,7 +701,7 @@ async def list_sessions(ctx):
     embed = discord.Embed(
         title='📊 Active Sessions',
         color=0x5865F2,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(UTC)
     )
     
     for session_id, session in active_sessions.items():
@@ -739,7 +739,7 @@ async def show_stats(ctx):
     embed = discord.Embed(
         title='📈 Your Statistics',
         color=0x00D4AA,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(UTC)
     )
     
     total_attempts = stats['total_sent'] + stats['total_failed']
@@ -797,7 +797,7 @@ async def help_command(ctx):
         title='🤖 Message Delivery System - Help',
         description='Advanced Discord message delivery system with batch processing and rate limiting.',
         color=0x5865F2,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(UTC)
     )
     
     embed.add_field(
