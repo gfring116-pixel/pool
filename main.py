@@ -6,6 +6,7 @@ import os
 import json
 import time
 from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 import random
 
 # Set up logging
