@@ -18,7 +18,7 @@ intents.guilds = True
 intents.members = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='-', intents=intents)
 
 # Store session data
 active_sessions = {}
