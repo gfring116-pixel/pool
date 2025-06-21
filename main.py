@@ -731,7 +731,7 @@ async def send_message(ctx, *, args=None):
     
     # Check for existing active session
     existing_session = None
-    for session_id, session in active_sessions.
+    for session_id, session in active_sessions.items():
 @bot.command(name='send')
 async def send_message(ctx, *, args=None):
     """Start the complex message sending process"""
