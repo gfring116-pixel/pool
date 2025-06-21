@@ -32,6 +32,7 @@ async def on_ready():
     print(f'Guilds: {len(bot.guilds)}')
     await load_message_templates()
     await load_user_preferences()
+    bot.loop.create_task(cleanup_task())  # ADD THIS LINE
     print('System ready')
 
 async def load_message_templates():
