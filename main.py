@@ -3,7 +3,6 @@ from discord.ext import commands
 import asyncio
 import logging
 import os
-import re
 import json
 import time
 from datetime import datetime, timedelta
@@ -20,7 +19,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Store complex session data
+# Store session data
 active_sessions = {}
 message_templates = {}
 user_preferences = {}
@@ -28,13 +27,11 @@ send_statistics = {}
 
 @bot.event
 async def on_ready():
-    print(f'bot ready: {bot.user}')
-    print(f'guilds: {len(bot.guilds)}')
-    print('loading message templates...')
+    print(f'Bot ready: {bot.user}')
+    print(f'Guilds: {len(bot.guilds)}')
     await load_message_templates()
-    print('loading user preferences...')
     await load_user_preferences()
-    print('system ready')
+    print('System ready')
 
 async def load_message_templates():
     """Load predefined message templates"""
@@ -66,20 +63,20 @@ async def load_message_templates():
             'footer': 'Update Notification'
         }
     }
-    print(f'loaded {len(message_templates)} templates')
+    print(f'Loaded {len(message_templates)} templates')
 
 async def load_user_preferences():
     """Load user messaging preferences"""
     global user_preferences
     user_preferences = {
         728201873366056992: {
-            'preferred_design': 'fancy',
+            'preferred_design': 'professional',
             'confirmation_required': True,
             'batch_size': 10,
-            'delay_between_batches': 5
+            'delay_between_batches': 2
         }
     }
-    print('preferences loaded')
+    print('User preferences loaded')
 
 class MessageSession:
     def __init__(self, user_id, channel_id, guild_id):
@@ -87,228 +84,111 @@ class MessageSession:
         self.channel_id = channel_id
         self.guild_id = guild_id
         self.session_id = f"{user_id}_{int(time.time())}"
-        self.stage = 'init'
+        self.stage = 'target_selection'
         self.data = {
             'targets': [],
             'message_content': '',
             'template': None,
-            'design': None,
+            'design': 'standard',
             'priority': 'normal',
-            'schedule_time': None,
-            'confirmation_code': None,
-            'batch_settings': {},
-            'custom_fields': {},
-            'safety_checks': {},
-            'delivery_options': {}
+            'batch_size': 10,
+            'delay': 2,
+            'confirmation_code': None
         }
         self.created_at = datetime.utcnow()
         self.last_activity = datetime.utcnow()
-        self.steps_completed = 0
-        self.total_steps = 12
 
     def update_activity(self):
         self.last_activity = datetime.utcnow()
 
-    def progress_percentage(self):
-        return int((self.steps_completed / self.total_steps) * 100)
+    def is_expired(self):
+        return datetime.utcnow() - self.last_activity > timedelta(minutes=15)
 
-class Step1View(discord.ui.View):
-    """Target Selection Step"""
+class TargetSelectionView(discord.ui.View):
     def __init__(self, session):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)  # 15 minutes
         self.session = session
 
-    @discord.ui.button(label='Role Members', style=discord.ButtonStyle.primary, emoji='👥')
-    async def select_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label='Select by Role', style=discord.ButtonStyle.primary, emoji='👥')
+    async def select_by_role(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
-        await interaction.response.send_message('enter role id:', ephemeral=True)
+        await interaction.response.send_message('Please enter the role ID:', ephemeral=True)
         self.session.stage = 'awaiting_role_id'
         self.session.update_activity()
 
-    @discord.ui.button(label='Mentioned Users', style=discord.ButtonStyle.secondary, emoji='@')
-    async def select_mentions(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label='Select by Mentions', style=discord.ButtonStyle.secondary, emoji='@')
+    async def select_by_mentions(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
-        await interaction.response.send_message('mention users in next message:', ephemeral=True)
+        await interaction.response.send_message('Please mention the users in your next message:', ephemeral=True)
         self.session.stage = 'awaiting_mentions'
         self.session.update_activity()
 
-    @discord.ui.button(label='Custom List', style=discord.ButtonStyle.success, emoji='📝')
-    async def select_custom(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label='Custom User List', style=discord.ButtonStyle.success, emoji='📝')
+    async def select_custom_list(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
-        await interaction.response.send_message('enter user ids separated by commas:', ephemeral=True)
+        await interaction.response.send_message('Please enter user IDs separated by commas:', ephemeral=True)
         self.session.stage = 'awaiting_custom_list'
         self.session.update_activity()
 
-class Step2View(discord.ui.View):
-    """Message Content Type Selection"""
+class MessageDesignView(discord.ui.View):
     def __init__(self, session):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)
         self.session = session
 
     @discord.ui.button(label='Plain Text', style=discord.ButtonStyle.secondary, emoji='📝')
-    async def plain_text(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def plain_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_design(interaction, 'plain')
+
+    @discord.ui.button(label='Standard Embed', style=discord.ButtonStyle.primary, emoji='📋')
+    async def standard_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_design(interaction, 'standard')
+
+    @discord.ui.button(label='Professional', style=discord.ButtonStyle.success, emoji='✨')
+    async def professional_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_design(interaction, 'professional')
+
+    @discord.ui.button(label='Alert Style', style=discord.ButtonStyle.danger, emoji='🚨')
+    async def alert_design(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_design(interaction, 'alert')
+
+    async def set_design(self, interaction, design):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
-        await interaction.response.edit_message(content='enter your message:', view=None)
-        self.session.stage = 'awaiting_message_content'
-        self.session.data['content_type'] = 'plain'
-        self.session.update_activity()
-
-    @discord.ui.button(label='Rich Text', style=discord.ButtonStyle.primary, emoji='✨')
-    async def rich_text(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
+        self.session.data['design'] = design
+        self.session.stage = 'batch_settings'
         
-        await interaction.response.edit_message(content='enter your message with formatting:', view=None)
-        self.session.stage = 'awaiting_message_content'
-        self.session.data['content_type'] = 'rich'
-        self.session.update_activity()
-
-    @discord.ui.button(label='Template Based', style=discord.ButtonStyle.success, emoji='📋')
-    async def template_based(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        template_view = TemplateSelectionView(self.session)
-        await interaction.response.edit_message(content='choose template:', view=template_view)
-        self.session.stage = 'selecting_template'
-        self.session.data['content_type'] = 'template'
-        self.session.update_activity()
-
-class TemplateSelectionView(discord.ui.View):
-    """Template Selection"""
-    def __init__(self, session):
-        super().__init__(timeout=600)
-        self.session = session
-        
-        # Add template buttons
-        for template_name, template_data in message_templates.items():
-            button = discord.ui.Button(
-                label=template_name.title(),
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"template_{template_name}"
-            )
-            button.callback = self.template_callback
-            self.add_item(button)
-
-    async def template_callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        template_name = interaction.data['custom_id'].replace('template_', '')
-        self.session.data['template'] = template_name
-        
+        batch_view = BatchSettingsView(self.session)
         await interaction.response.edit_message(
-            content=f'selected template: {template_name}\nenter your message content:',
-            view=None
-        )
-        self.session.stage = 'awaiting_template_content'
-        self.session.update_activity()
-
-class Step3View(discord.ui.View):
-    """Priority Selection"""
-    def __init__(self, session):
-        super().__init__(timeout=600)
-        self.session = session
-
-    @discord.ui.button(label='Low Priority', style=discord.ButtonStyle.secondary, emoji='🔵')
-    async def low_priority(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_priority(interaction, 'low')
-
-    @discord.ui.button(label='Normal Priority', style=discord.ButtonStyle.primary, emoji='🟡')
-    async def normal_priority(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_priority(interaction, 'normal')
-
-    @discord.ui.button(label='High Priority', style=discord.ButtonStyle.danger, emoji='🔴')
-    async def high_priority(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_priority(interaction, 'high')
-
-    @discord.ui.button(label='Critical Priority', style=discord.ButtonStyle.danger, emoji='🚨')
-    async def critical_priority(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_priority(interaction, 'critical')
-
-    async def set_priority(self, interaction, priority):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        self.session.data['priority'] = priority
-        self.session.steps_completed = 3
-        
-        schedule_view = Step4View(self.session)
-        await interaction.response.edit_message(
-            content=f'priority set: {priority}\n\nschedule delivery:',
-            view=schedule_view
-        )
-        self.session.stage = 'scheduling'
-        self.session.update_activity()
-
-class Step4View(discord.ui.View):
-    """Delivery Scheduling"""
-    def __init__(self, session):
-        super().__init__(timeout=600)
-        self.session = session
-
-    @discord.ui.button(label='Send Now', style=discord.ButtonStyle.success, emoji='⚡')
-    async def send_now(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        self.session.data['schedule_time'] = 'now'
-        await self.proceed_to_batch_settings(interaction)
-
-    @discord.ui.button(label='Schedule for Later', style=discord.ButtonStyle.primary, emoji='⏰')
-    async def schedule_later(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        await interaction.response.edit_message(
-            content='enter schedule time (format: YYYY-MM-DD HH:MM):',
-            view=None
-        )
-        self.session.stage = 'awaiting_schedule_time'
-        self.session.update_activity()
-
-    async def proceed_to_batch_settings(self, interaction):
-        self.session.steps_completed = 4
-        batch_view = Step5View(self.session)
-        await interaction.response.edit_message(
-            content=f'delivery scheduled: {self.session.data["schedule_time"]}\n\nconfigure batch settings:',
+            content=f'✅ Design set to: **{design}**\n\nNow configure batch settings:',
             view=batch_view
         )
-        self.session.stage = 'batch_settings'
+        self.session.update_activity()
 
-class Step5View(discord.ui.View):
-    """Batch Settings Configuration"""
+class BatchSettingsView(discord.ui.View):
     def __init__(self, session):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)
         self.session = session
 
-    @discord.ui.button(label='Small Batches (5)', style=discord.ButtonStyle.secondary, emoji='🔢')
+    @discord.ui.button(label='Small (5 per batch)', style=discord.ButtonStyle.secondary, emoji='🔢')
     async def small_batch(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_batch_size(interaction, 5)
 
-    @discord.ui.button(label='Medium Batches (10)', style=discord.ButtonStyle.primary, emoji='🔢')
+    @discord.ui.button(label='Medium (10 per batch)', style=discord.ButtonStyle.primary, emoji='🔢')
     async def medium_batch(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_batch_size(interaction, 10)
 
-    @discord.ui.button(label='Large Batches (20)', style=discord.ButtonStyle.success, emoji='🔢')
+    @discord.ui.button(label='Large (20 per batch)', style=discord.ButtonStyle.success, emoji='🔢')
     async def large_batch(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_batch_size(interaction, 20)
 
@@ -318,24 +198,22 @@ class Step5View(discord.ui.View):
 
     async def set_batch_size(self, interaction, size):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
-        self.session.data['batch_settings']['size'] = size
-        self.session.steps_completed = 5
+        self.session.data['batch_size'] = size
+        self.session.stage = 'delay_settings'
         
-        delay_view = Step6View(self.session)
+        delay_view = DelaySettingsView(self.session)
         await interaction.response.edit_message(
-            content=f'batch size: {size}\n\nset delay between batches:',
+            content=f'✅ Batch size set to: **{size}**\n\nNow set delay between batches:',
             view=delay_view
         )
-        self.session.stage = 'delay_settings'
         self.session.update_activity()
 
-class Step6View(discord.ui.View):
-    """Delay Settings"""
+class DelaySettingsView(discord.ui.View):
     def __init__(self, session):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)
         self.session = session
 
     @discord.ui.button(label='No Delay', style=discord.ButtonStyle.secondary, emoji='⚡')
@@ -354,265 +232,83 @@ class Step6View(discord.ui.View):
     async def five_seconds(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_delay(interaction, 5)
 
-    @discord.ui.button(label='Custom Delay', style=discord.ButtonStyle.danger, emoji='⏱️')
-    async def custom_delay(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        await interaction.response.edit_message(
-            content='enter custom delay in seconds:',
-            view=None
-        )
-        self.session.stage = 'awaiting_custom_delay'
-        self.session.update_activity()
-
     async def set_delay(self, interaction, delay):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
-        self.session.data['batch_settings']['delay'] = delay
-        self.session.steps_completed = 6
+        self.session.data['delay'] = delay
+        self.session.stage = 'confirmation'
         
-        await self.proceed_to_safety_checks(interaction)
-
-    async def proceed_to_safety_checks(self, interaction):
-        safety_view = Step7View(self.session)
-        await interaction.response.edit_message(
-            content=f'delay set: {self.session.data["batch_settings"]["delay"]}s\n\nsafety verification required:',
-            view=safety_view
-        )
-        self.session.stage = 'safety_checks'
-
-class Step7View(discord.ui.View):
-    """Safety Checks"""
-    def __init__(self, session):
-        super().__init__(timeout=600)
-        self.session = session
-
-    @discord.ui.button(label='Verify Message Content', style=discord.ButtonStyle.primary, emoji='✅')
-    async def verify_content(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        self.session.data['safety_checks']['content_verified'] = True
-        await self.check_safety_progress(interaction)
-
-    @discord.ui.button(label='Verify Target List', style=discord.ButtonStyle.primary, emoji='👥')
-    async def verify_targets(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        self.session.data['safety_checks']['targets_verified'] = True
-        await self.check_safety_progress(interaction)
-
-    @discord.ui.button(label='Verify Permissions', style=discord.ButtonStyle.primary, emoji='🔒')
-    async def verify_permissions(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        self.session.data['safety_checks']['permissions_verified'] = True
-        await self.check_safety_progress(interaction)
-
-    async def check_safety_progress(self, interaction):
-        checks = self.session.data['safety_checks']
-        completed = sum(1 for check in checks.values() if check)
-        total = 3
-        
-        if completed == total:
-            self.session.steps_completed = 7
-            confirmation_view = Step8View(self.session)
-            await interaction.response.edit_message(
-                content='all safety checks completed\n\ngenerate confirmation code:',
-                view=confirmation_view
-            )
-            self.session.stage = 'confirmation_code'
-        else:
-            await interaction.response.edit_message(
-                content=f'safety checks: {completed}/{total} completed\ncontinue verification:',
-                view=self
-            )
-
-class Step8View(discord.ui.View):
-    """Confirmation Code Generation"""
-    def __init__(self, session):
-        super().__init__(timeout=600)
-        self.session = session
-
-    @discord.ui.button(label='Generate Code', style=discord.ButtonStyle.success, emoji='🔐')
-    async def generate_code(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        # Generate random confirmation code
-        code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        # Generate confirmation code
+        code = ''.join([str(random.randint(0, 9)) for _ in range(4)])
         self.session.data['confirmation_code'] = code
-        self.session.steps_completed = 8
         
         await interaction.response.edit_message(
-            content=f'confirmation code: **{code}**\n\ntype this code to proceed:',
+            content=f'✅ Delay set to: **{delay} seconds**\n\n🔐 **Confirmation required**\nType this code to proceed: **{code}**',
             view=None
         )
-        self.session.stage = 'awaiting_confirmation_code'
         self.session.update_activity()
 
-class Step9View(discord.ui.View):
-    """Design Selection"""
+class FinalConfirmationView(discord.ui.View):
     def __init__(self, session):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)
         self.session = session
 
-    @discord.ui.button(label='Minimal', style=discord.ButtonStyle.secondary, emoji='📝')
-    async def minimal_design(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_design(interaction, 'minimal')
-
-    @discord.ui.button(label='Standard', style=discord.ButtonStyle.primary, emoji='📋')
-    async def standard_design(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_design(interaction, 'standard')
-
-    @discord.ui.button(label='Professional', style=discord.ButtonStyle.success, emoji='✨')
-    async def professional_design(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_design(interaction, 'professional')
-
-    @discord.ui.button(label='Alert Style', style=discord.ButtonStyle.danger, emoji='🚨')
-    async def alert_design(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_design(interaction, 'alert')
-
-    async def set_design(self, interaction, design):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        self.session.data['design'] = design
-        self.session.steps_completed = 9
-        
-        preview_view = Step10View(self.session)
-        await interaction.response.edit_message(
-            content=f'design selected: {design}\n\npreview message:',
-            view=preview_view
-        )
-        self.session.stage = 'preview'
-        self.session.update_activity()
-
-class Step10View(discord.ui.View):
-    """Message Preview"""
-    def __init__(self, session):
-        super().__init__(timeout=600)
-        self.session = session
-
-    @discord.ui.button(label='Show Preview', style=discord.ButtonStyle.primary, emoji='👁️')
-    async def show_preview(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        # Create preview message
-        message_data = await create_message_from_session(self.session)
-        
-        if message_data['type'] == 'text':
-            preview_content = f"**PREVIEW:**\n{message_data['content']}"
-        else:
-            preview_content = "**PREVIEW:**"
-            
-        final_view = Step11View(self.session, message_data)
-        
-        if message_data['type'] == 'embed':
-            await interaction.response.edit_message(
-                content=preview_content,
-                embed=message_data['embed'],
-                view=final_view
-            )
-        else:
-            await interaction.response.edit_message(
-                content=preview_content,
-                view=final_view
-            )
-        
-        self.session.steps_completed = 10
-        self.session.stage = 'final_confirmation'
-
-class Step11View(discord.ui.View):
-    """Final Confirmation"""
-    def __init__(self, session, message_data):
-        super().__init__(timeout=600)
-        self.session = session
-        self.message_data = message_data
-
-    @discord.ui.button(label='Send Messages', style=discord.ButtonStyle.success, emoji='🚀')
+    @discord.ui.button(label='✅ Send Messages', style=discord.ButtonStyle.success, emoji='🚀')
     async def send_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
         await interaction.response.edit_message(
-            content='processing delivery...',
-            embed=None,
+            content='🚀 **Sending messages...**\nThis may take a while depending on the number of targets.',
             view=None
         )
         
-        # Execute the message sending
-        success, fail = await execute_message_delivery(self.session, self.message_data)
+        # Execute message sending
+        success, failed = await execute_message_delivery(self.session)
         
         # Update statistics
-        await update_send_statistics(self.session.user_id, success, fail)
+        await update_send_statistics(self.session.user_id, success, failed)
         
-        self.session.steps_completed = 12
-        
-        await interaction.followup.send(
-            f'delivery complete\n'
-            f'sent: {success}\n'
-            f'failed: {fail}\n'
-            f'total targets: {len(self.session.data["targets"])}\n'
-            f'session: {self.session.session_id}'
+        # Send completion message
+        embed = discord.Embed(
+            title='📊 Delivery Complete',
+            color=0x00FF00 if failed == 0 else 0xFFA500,
+            timestamp=datetime.utcnow()
         )
+        embed.add_field(name='✅ Successful', value=str(success), inline=True)
+        embed.add_field(name='❌ Failed', value=str(failed), inline=True)
+        embed.add_field(name='📈 Success Rate', value=f'{(success/(success+failed)*100):.1f}%' if success+failed > 0 else 'N/A', inline=True)
+        
+        await interaction.followup.send(embed=embed)
         
         # Clean up session
         if self.session.session_id in active_sessions:
             del active_sessions[self.session.session_id]
 
-    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.danger, emoji='❌')
+    @discord.ui.button(label='❌ Cancel', style=discord.ButtonStyle.danger, emoji='🛑')
     async def cancel_send(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
+            await interaction.response.send_message('This is not your session.', ephemeral=True)
             return
         
         await interaction.response.edit_message(
-            content='message delivery cancelled',
-            embed=None,
+            content='❌ **Message delivery cancelled.**',
             view=None
         )
         
         # Clean up session
         if self.session.session_id in active_sessions:
             del active_sessions[self.session.session_id]
-
-    @discord.ui.button(label='Modify Settings', style=discord.ButtonStyle.secondary, emoji='⚙️')
-    async def modify_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        # Go back to design selection
-        design_view = Step9View(self.session)
-        await interaction.response.edit_message(
-            content='modify settings - choose design:',
-            embed=None,
-            view=design_view
-        )
-        self.session.stage = 'design_selection'
 
 async def create_message_from_session(session):
     """Create the final message based on session data"""
-    content = session.data.get('message_content', '')
-    design = session.data.get('design', 'standard')
-    template = session.data.get('template')
+    content = session.data['message_content']
+    design = session.data['design']
     
-    if design == 'minimal':
+    if design == 'plain':
         return {'type': 'text', 'content': content}
     
     elif design == 'standard':
@@ -635,7 +331,7 @@ async def create_message_from_session(session):
     
     elif design == 'alert':
         embed = discord.Embed(
-            title='🚨 Important Notice',
+            title='🚨 Important Alert',
             description=content,
             color=0xFF4444,
             timestamp=datetime.utcnow()
@@ -643,37 +339,28 @@ async def create_message_from_session(session):
         embed.set_footer(text='Alert System')
         return {'type': 'embed', 'embed': embed}
     
-    # Template-based message
-    if template and template in message_templates:
-        template_data = message_templates[template]
-        embed = discord.Embed(
-            title=template_data['title'],
-            description=content,
-            color=template_data['color'],
-            timestamp=datetime.utcnow()
-        )
-        embed.set_footer(text=template_data['footer'])
-        return {'type': 'embed', 'embed': embed}
-    
     # Default fallback
     return {'type': 'text', 'content': content}
 
-async def execute_message_delivery(session, message_data):
+async def execute_message_delivery(session):
     """Execute the actual message delivery"""
     targets = session.data['targets']
-    batch_size = session.data['batch_settings'].get('size', 10)
-    delay = session.data['batch_settings'].get('delay', 1)
+    batch_size = session.data['batch_size']
+    delay = session.data['delay']
     
     success_count = 0
     fail_count = 0
     
-    print(f'starting delivery for session {session.session_id}')
-    print(f'targets: {len(targets)}, batch_size: {batch_size}, delay: {delay}s')
+    print(f'Starting delivery for session {session.session_id}')
+    print(f'Targets: {len(targets)}, Batch size: {batch_size}, Delay: {delay}s')
+    
+    # Create message
+    message_data = await create_message_from_session(session)
     
     # Process in batches
     for i in range(0, len(targets), batch_size):
         batch = targets[i:i + batch_size]
-        print(f'processing batch {i//batch_size + 1}: {len(batch)} targets')
+        print(f'Processing batch {i//batch_size + 1}: {len(batch)} targets')
         
         for target in batch:
             try:
@@ -682,23 +369,26 @@ async def execute_message_delivery(session, message_data):
                 else:
                     await target.send(embed=message_data['embed'])
                 
-                print(f'sent to {target.display_name}')
+                print(f'✅ Sent to {target.display_name}')
                 success_count += 1
                 await asyncio.sleep(0.5)  # Small delay between individual messages
                 
             except discord.Forbidden:
-                print(f'dms disabled: {target.display_name}')
+                print(f'❌ DMs disabled: {target.display_name}')
+                fail_count += 1
+            except discord.HTTPException as e:
+                print(f'❌ HTTP error for {target.display_name}: {e}')
                 fail_count += 1
             except Exception as e:
-                print(f'error {target.display_name}: {e}')
+                print(f'❌ Unexpected error for {target.display_name}: {e}')
                 fail_count += 1
         
         # Delay between batches
         if i + batch_size < len(targets) and delay > 0:
-            print(f'batch complete, waiting {delay}s before next batch...')
+            print(f'Waiting {delay}s before next batch...')
             await asyncio.sleep(delay)
     
-    print(f'delivery complete: sent {success_count}, failed {fail_count}')
+    print(f'Delivery complete: {success_count} sent, {fail_count} failed')
     return success_count, fail_count
 
 async def update_send_statistics(user_id, success, fail):
@@ -716,18 +406,19 @@ async def update_send_statistics(user_id, success, fail):
     stats['total_failed'] += fail
     stats['sessions_completed'] += 1
     stats['last_send'] = datetime.utcnow()
-    
-    print(f'updated stats for user {user_id}: {stats}')
-    
+
 @bot.command(name='send')
-async def send_message(ctx, *, args=None):
-    """Start the complex message sending process"""
+async def send_message(ctx):
+    """Start the message sending process"""
     # Authorization check
     authorized_users = [728201873366056992]
     
     if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
+        await ctx.send('❌ You are not authorized to use this command.')
         return
+    
+    # Clean up expired sessions first
+    await cleanup_expired_sessions()
     
     # Check for existing active session
     existing_session = None
@@ -739,15 +430,12 @@ async def send_message(ctx, *, args=None):
     if existing_session:
         embed = discord.Embed(
             title='⚠️ Active Session Found',
-            description=f'You have an active session: `{existing_session.session_id}`\n'
-                       f'Progress: {existing_session.progress_percentage()}%\n'
-                       f'Stage: {existing_session.stage}',
+            description=f'You already have an active session: `{existing_session.session_id}`\n'
+                       f'Stage: {existing_session.stage}\n'
+                       f'Created: {existing_session.created_at.strftime("%H:%M:%S")}',
             color=0xFFA500
         )
-        embed.add_field(name='Options', value='React to continue or start new', inline=False)
-        
-        view = ExistingSessionView(existing_session)
-        await ctx.send(embed=embed, view=view)
+        await ctx.send(embed=embed)
         return
     
     # Create new session
@@ -757,80 +445,18 @@ async def send_message(ctx, *, args=None):
     # Create initial embed
     embed = discord.Embed(
         title='📨 Message Delivery System',
-        description='Advanced message delivery system initialized\n'
-                   f'Session ID: `{session.session_id}`\n'
-                   f'Progress: {session.progress_percentage()}%',
+        description=f'Welcome to the advanced message delivery system!\n\n'
+                   f'**Session ID:** `{session.session_id}`\n'
+                   f'**Step 1:** Choose how to select message recipients',
         color=0x5865F2,
         timestamp=datetime.utcnow()
     )
     
-    embed.add_field(
-        name='Step 1: Target Selection',
-        value='Choose how to select message recipients',
-        inline=False
-    )
-    
-    embed.set_footer(text=f'Session timeout: 10 minutes')
+    embed.set_footer(text='Session will expire in 15 minutes of inactivity')
     
     # Start with target selection
-    view = Step1View(session)
+    view = TargetSelectionView(session)
     await ctx.send(embed=embed, view=view)
-    session.stage = 'target_selection'
-
-class ExistingSessionView(discord.ui.View):
-    """Handle existing session options"""
-    def __init__(self, session):
-        super().__init__(timeout=300)
-        self.session = session
-
-    @discord.ui.button(label='Continue Session', style=discord.ButtonStyle.success, emoji='▶️')
-    async def continue_session(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        # Resume from current stage
-        stage = self.session.stage
-        
-        if stage == 'target_selection':
-            view = Step1View(self.session)
-            content = 'continuing session - select targets:'
-        elif stage == 'content_selection':
-            view = Step2View(self.session)
-            content = 'continuing session - select content type:'
-        elif stage == 'priority_selection':
-            view = Step3View(self.session)
-            content = 'continuing session - set priority:'
-        else:
-            view = None
-            content = f'session in stage: {stage}\nplease complete current step'
-        
-        await interaction.response.edit_message(content=content, embed=None, view=view)
-
-    @discord.ui.button(label='Start New Session', style=discord.ButtonStyle.danger, emoji='🔄')
-    async def new_session(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message('not your session', ephemeral=True)
-            return
-        
-        # Remove existing session
-        if self.session.session_id in active_sessions:
-            del active_sessions[self.session.session_id]
-        
-        # Create new session
-        new_session = MessageSession(interaction.user.id, interaction.channel.id, interaction.guild.id)
-        active_sessions[new_session.session_id] = new_session
-        
-        embed = discord.Embed(
-            title='📨 New Message Delivery Session',
-            description=f'Session ID: `{new_session.session_id}`\n'
-                       f'Progress: {new_session.progress_percentage()}%',
-            color=0x5865F2
-        )
-        embed.add_field(name='Step 1', value='Select message targets', inline=False)
-        
-        view = Step1View(new_session)
-        await interaction.response.edit_message(embed=embed, view=view)
 
 @bot.event
 async def on_message(message):
@@ -849,32 +475,31 @@ async def on_message(message):
         await bot.process_commands(message)
         return
     
-    stage = user_session.stage
+    # Handle session input
+    await handle_session_input(message, user_session)
+
+async def handle_session_input(message, session):
+    """Handle different types of session input"""
+    stage = session.stage
     content = message.content.strip()
     
     try:
         if stage == 'awaiting_role_id':
-            await handle_role_id_input(message, user_session, content)
+            await handle_role_id_input(message, session, content)
         elif stage == 'awaiting_mentions':
-            await handle_mentions_input(message, user_session)
+            await handle_mentions_input(message, session)
         elif stage == 'awaiting_custom_list':
-            await handle_custom_list_input(message, user_session, content)
+            await handle_custom_list_input(message, session, content)
         elif stage == 'awaiting_message_content':
-            await handle_message_content_input(message, user_session, content)
-        elif stage == 'awaiting_template_content':
-            await handle_template_content_input(message, user_session, content)
-        elif stage == 'awaiting_schedule_time':
-            await handle_schedule_time_input(message, user_session, content)
-        elif stage == 'awaiting_custom_delay':
-            await handle_custom_delay_input(message, user_session, content)
-        elif stage == 'awaiting_confirmation_code':
-            await handle_confirmation_code_input(message, user_session, content)
+            await handle_message_content_input(message, session, content)
+        elif stage == 'confirmation':
+            await handle_confirmation_code_input(message, session, content)
         else:
             await bot.process_commands(message)
     
     except Exception as e:
-        await message.channel.send(f'error processing input: {e}')
-        print(f'session error: {e}')
+        await message.channel.send(f'❌ Error processing input: {str(e)}')
+        print(f'Session error: {e}')
 
 async def handle_role_id_input(message, session, role_id_str):
     """Handle role ID input"""
@@ -883,72 +508,63 @@ async def handle_role_id_input(message, session, role_id_str):
         role = message.guild.get_role(role_id)
         
         if not role:
-            await message.channel.send('role not found, try again:')
+            await message.reply('❌ Role not found. Please try again with a valid role ID.')
             return
         
-        # Get role members
+        # Get role members (exclude bots)
         members = [member for member in role.members if not member.bot]
         
         if not members:
-            await message.channel.send('no members in role, try again:')
+            await message.reply('❌ No valid members found in this role. Please try again.')
             return
         
         session.data['targets'] = members
-        session.steps_completed = 1
+        session.stage = 'awaiting_message_content'
         
         embed = discord.Embed(
-            title='✅ Targets Selected', 
-            description=f'Role: {role.name}\nMembers: {len(members)}',
+            title='✅ Targets Selected',
+            description=f'**Role:** {role.name}\n**Members:** {len(members)} users',
             color=0x00FF00
         )
         
-        # Move to content selection
-        view = Step2View(session)
-        await message.channel.send(
-            content='step 2: choose message type:',
-            embed=embed,
-            view=view
-        )
-        session.stage = 'content_selection'
+        await message.reply(embed=embed)
+        await message.channel.send('📝 **Step 2:** Please enter your message content:')
+        session.update_activity()
         
     except ValueError:
-        await message.channel.send('invalid role id, enter numbers only:')
+        await message.reply('❌ Invalid role ID. Please enter numbers only.')
 
 async def handle_mentions_input(message, session):
     """Handle mentioned users input"""
     mentioned_users = [user for user in message.mentions if not user.bot]
     
     if not mentioned_users:
-        await message.channel.send('no valid users mentioned, try again:')
+        await message.reply('❌ No valid users mentioned. Please try again.')
         return
     
     session.data['targets'] = mentioned_users
-    session.steps_completed = 1
+    session.stage = 'awaiting_message_content'
     
     embed = discord.Embed(
         title='✅ Targets Selected',
-        description=f'Mentioned users: {len(mentioned_users)}',
+        description=f'**Mentioned Users:** {len(mentioned_users)} users',
         color=0x00FF00
     )
     
-    for user in mentioned_users[:10]:  # Show first 10
-        embed.add_field(name=user.display_name, value=user.mention, inline=True)
+    # Show first few users
+    user_list = ', '.join([user.display_name for user in mentioned_users[:5]])
+    if len(mentioned_users) > 5:
+        user_list += f' and {len(mentioned_users) - 5} more...'
+    embed.add_field(name='Users', value=user_list, inline=False)
     
-    if len(mentioned_users) > 10:
-        embed.add_field(name='...', value=f'and {len(mentioned_users) - 10} more', inline=True)
-    
-    view = Step2View(session)
-    await message.channel.send(
-        content='step 2: choose message type:',
-        embed=embed,
-        view=view
-    )
-    session.stage = 'content_selection'
+    await message.reply(embed=embed)
+    await message.channel.send('📝 **Step 2:** Please enter your message content:')
+    session.update_activity()
 
 async def handle_custom_list_input(message, session, user_ids_str):
     """Handle custom user ID list input"""
     try:
-        user_ids = [int(uid.strip()) for uid in user_ids_str.split(',')]
+        user_ids = [int(uid.strip()) for uid in user_ids_str.split(',') if uid.strip()]
         users = []
         
         for user_id in user_ids:
@@ -960,180 +576,112 @@ async def handle_custom_list_input(message, session, user_ids_str):
                 continue
         
         if not users:
-            await message.channel.send('no valid users found, try again:')
+            await message.reply('❌ No valid users found. Please check the user IDs and try again.')
             return
         
         session.data['targets'] = users
-        session.steps_completed = 1
+        session.stage = 'awaiting_message_content'
         
         embed = discord.Embed(
             title='✅ Targets Selected',
-            description=f'Custom list: {len(users)} users',
+            description=f'**Custom List:** {len(users)} users found',
             color=0x00FF00
         )
         
-        view = Step2View(session)
-        await message.channel.send(
-            content='step 2: choose message type:',
-            embed=embed,
-            view=view
-        )
-        session.stage = 'content_selection'
+        await message.reply(embed=embed)
+        await message.channel.send('📝 **Step 2:** Please enter your message content:')
+        session.update_activity()
         
     except ValueError:
-        await message.channel.send('invalid format, use: id1, id2, id3')
+        await message.reply('❌ Invalid format. Please use: `123456789, 987654321, 555666777`')
 
 async def handle_message_content_input(message, session, content):
     """Handle message content input"""
     if len(content) > 2000:
-        await message.channel.send('message too long (max 2000 characters), try again:')
+        await message.reply('❌ Message too long (max 2000 characters). Please shorten your message.')
         return
     
     if not content:
-        await message.channel.send('message cannot be empty, try again:')
+        await message.reply('❌ Message cannot be empty. Please enter your message.')
         return
     
     session.data['message_content'] = content
-    session.steps_completed = 2
+    session.stage = 'design_selection'
     
     embed = discord.Embed(
         title='✅ Message Content Set',
-        description=f'Content length: {len(content)} characters',
+        description=f'**Length:** {len(content)} characters',
         color=0x00FF00
     )
     
-    # Show preview of content
+    # Show preview
     preview = content[:200] + '...' if len(content) > 200 else content
     embed.add_field(name='Preview', value=f'```{preview}```', inline=False)
     
-    view = Step3View(session)
-    await message.channel.send(
-        content='step 3: set message priority:',
-        embed=embed,
-        view=view
-    )
-    session.stage = 'priority_selection'
-
-async def handle_template_content_input(message, session, content):
-    """Handle template-based content input"""
-    if len(content) > 1500:  # Templates have additional formatting
-        await message.channel.send('content too long for template (max 1500 characters), try again:')
-        return
+    await message.reply(embed=embed)
     
-    if not content:
-        await message.channel.send('content cannot be empty, try again:')
-        return
-    
-    session.data['message_content'] = content
-    session.steps_completed = 2
-    
-    template_name = session.data['template']
-    embed = discord.Embed(
-        title='✅ Template Content Set',
-        description=f'Template: {template_name}\nContent length: {len(content)} characters',
-        color=0x00FF00
-    )
-    
-    view = Step3View(session)
-    await message.channel.send(
-        content='step 3: set message priority:',
-        embed=embed,
-        view=view
-    )
-    session.stage = 'priority_selection'
-
-async def handle_schedule_time_input(message, session, time_str):
-    """Handle schedule time input"""
-    try:
-        # Parse time format: YYYY-MM-DD HH:MM
-        schedule_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
-        
-        # Check if time is in the future
-        if schedule_time <= datetime.now():
-            await message.channel.send('time must be in the future, try again:')
-            return
-        
-        # Check if time is not too far in the future (e.g., 30 days)
-        if schedule_time > datetime.now() + timedelta(days=30):
-            await message.channel.send('time too far in future (max 30 days), try again:')
-            return
-        
-        session.data['schedule_time'] = schedule_time
-        session.steps_completed = 4
-        
-        embed = discord.Embed(
-            title='✅ Schedule Time Set',
-            description=f'Delivery time: {schedule_time.strftime("%Y-%m-%d %H:%M")}',
-            color=0x00FF00
-        )
-        
-        view = Step5View(session)
-        await message.channel.send(
-            content='step 5: configure batch settings:',
-            embed=embed,
-            view=view
-        )
-        session.stage = 'batch_settings'
-        
-    except ValueError:
-        await message.channel.send('invalid time format, use: YYYY-MM-DD HH:MM')
-
-async def handle_custom_delay_input(message, session, delay_str):
-    """Handle custom delay input"""
-    try:
-        delay = float(delay_str)
-        
-        if delay < 0:
-            await message.channel.send('delay cannot be negative, try again:')
-            return
-        
-        if delay > 300:  # Max 5 minutes
-            await message.channel.send('delay too long (max 300 seconds), try again:')
-            return
-        
-        session.data['batch_settings']['delay'] = delay
-        session.steps_completed = 6
-        
-        embed = discord.Embed(
-            title='✅ Custom Delay Set',
-            description=f'Delay: {delay} seconds',
-            color=0x00FF00
-        )
-        
-        view = Step7View(session)
-        await message.channel.send(
-            content='step 7: safety verification required:',
-            embed=embed,
-            view=view
-        )
-        session.stage = 'safety_checks'
-        
-    except ValueError:
-        await message.channel.send('invalid number, enter delay in seconds:')
+    # Move to design selection
+    design_view = MessageDesignView(session)
+    await message.channel.send('🎨 **Step 3:** Choose your message design:', view=design_view)
+    session.update_activity()
 
 async def handle_confirmation_code_input(message, session, code):
     """Handle confirmation code input"""
     expected_code = session.data.get('confirmation_code')
     
     if code != expected_code:
-        await message.channel.send(f'incorrect code, expected: **{expected_code}**')
+        await message.reply(f'❌ Incorrect code. Expected: **{expected_code}**')
         return
     
-    session.steps_completed = 9
+    session.stage = 'final_confirmation'
+    
+    # Create summary
+    targets_count = len(session.data['targets'])
+    content_length = len(session.data['message_content'])
+    design = session.data['design']
+    batch_size = session.data['batch_size']
+    delay = session.data['delay']
     
     embed = discord.Embed(
-        title='✅ Code Confirmed',
-        description='Confirmation successful',
-        color=0x00FF00
+        title='📋 Final Summary',
+        description='Please review your message settings before sending:',
+        color=0x5865F2,
+        timestamp=datetime.utcnow()
     )
     
-    view = Step9View(session)
-    await message.channel.send(
-        content='step 9: choose message design:',
-        embed=embed,
-        view=view
-    )
-    session.stage = 'design_selection'
+    embed.add_field(name='👥 Targets', value=str(targets_count), inline=True)
+    embed.add_field(name='📝 Message Length', value=f'{content_length} chars', inline=True)
+    embed.add_field(name='🎨 Design', value=design.title(), inline=True)
+    embed.add_field(name='📦 Batch Size', value=str(batch_size), inline=True)
+    embed.add_field(name='⏱️ Delay', value=f'{delay}s', inline=True)
+    embed.add_field(name='📊 Est. Time', value=f'{(targets_count/batch_size)*delay:.1f}s', inline=True)
+    
+    # Show message preview
+    message_data = await create_message_from_session(session)
+    
+    view = FinalConfirmationView(session)
+    
+    if message_data['type'] == 'embed':
+        await message.reply(embed=embed)
+        await message.channel.send('**Message Preview:**', embed=message_data['embed'], view=view)
+    else:
+        await message.reply(embed=embed)
+        await message.channel.send(f'**Message Preview:**\n```{message_data["content"]}```', view=view)
+    
+    session.update_activity()
+
+async def cleanup_expired_sessions():
+    """Clean up expired sessions"""
+    current_time = datetime.utcnow()
+    expired_sessions = []
+    
+    for session_id, session in list(active_sessions.items()):
+        if session.is_expired():
+            expired_sessions.append(session_id)
+            del active_sessions[session_id]
+    
+    if expired_sessions:
+        print(f'Cleaned up {len(expired_sessions)} expired sessions')
 
 @bot.command(name='sessions')
 async def list_sessions(ctx):
@@ -1141,11 +689,13 @@ async def list_sessions(ctx):
     authorized_users = [728201873366056992]
     
     if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
+        await ctx.send('❌ You are not authorized to use this command.')
         return
     
+    await cleanup_expired_sessions()
+    
     if not active_sessions:
-        await ctx.send('no active sessions')
+        await ctx.send('📭 No active sessions.')
         return
     
     embed = discord.Embed(
@@ -1160,11 +710,10 @@ async def list_sessions(ctx):
         
         embed.add_field(
             name=f'Session: {session_id}',
-            value=f'User: {username}\n'
-                  f'Progress: {session.progress_percentage()}%\n'
-                  f'Stage: {session.stage}\n'
-                  f'Targets: {len(session.data.get("targets", []))}\n'
-                  f'Created: {session.created_at.strftime("%H:%M:%S")}',
+            value=f'**User:** {username}\n'
+                  f'**Stage:** {session.stage}\n'
+                  f'**Targets:** {len(session.data.get("targets", []))}\n'
+                  f'**Created:** {session.created_at.strftime("%H:%M:%S")}',
             inline=True
         )
     
@@ -1176,13 +725,13 @@ async def show_stats(ctx):
     authorized_users = [728201873366056992]
     
     if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
+        await ctx.send('❌ You are not authorized to use this command.')
         return
     
     user_id = ctx.author.id
     
     if user_id not in send_statistics:
-        await ctx.send('no statistics available')
+        await ctx.send('📊 No statistics available yet.')
         return
     
     stats = send_statistics[user_id]
@@ -1193,263 +742,297 @@ async def show_stats(ctx):
         timestamp=datetime.utcnow()
     )
     
-    embed.add_field(name='Messages Sent', value=stats['total_sent'], inline=True)
-    embed.add_field(name='Failed Deliveries', value=stats['total_failed'], inline=True)
-    embed.add_field(name='Success Rate', value=f"{stats['total_sent']/(stats['total_sent']+stats['total_failed'])*100:.1f}%" if stats['total_sent']+stats['total_failed'] > 0 else "0%", inline=True)
-    embed.add_field(name='Sessions Completed', value=stats['sessions_completed'], inline=True)
+    total_attempts = stats['total_sent'] + stats['total_failed']
+    success_rate = (stats['total_sent'] / total_attempts * 100) if total_attempts > 0 else 0
+    
+    embed.add_field(name='✅ Messages Sent', value=str(stats['total_sent']), inline=True)
+    embed.add_field(name='❌ Failed Deliveries', value=str(stats['total_failed']), inline=True)
+    embed.add_field(name='📊 Success Rate', value=f'{success_rate:.1f}%', inline=True)
+    embed.add_field(name='🎯 Sessions Completed', value=str(stats['sessions_completed']), inline=True)
     
     if stats['last_send']:
-        embed.add_field(name='Last Send', value=stats['last_send'].strftime('%Y-%m-%d %H:%M:%S'), inline=True)
+        embed.add_field(name='🕒 Last Activity', value=stats['last_send'].strftime('%Y-%m-%d %H:%M:%S UTC'), inline=True)
+    
+    embed.add_field(name='📈 Total Attempts', value=str(total_attempts), inline=True)
     
     await ctx.send(embed=embed)
 
-@bot.command(name='cleanup')
-async def cleanup_sessions(ctx):
-    """Clean up expired sessions"""
+@bot.command(name='cancel')
+async def cancel_session(ctx):
+    """Cancel active session"""
     authorized_users = [728201873366056992]
     
     if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
+        await ctx.send('❌ You are not authorized to use this command.')
         return
     
-    current_time = datetime.utcnow()
-    expired_sessions = []
-    
+    # Find user's active session
+    user_session = None
     for session_id, session in list(active_sessions.items()):
-        # Sessions expire after 10 minutes of inactivity
-        if current_time - session.last_activity > timedelta(minutes=10):
-            expired_sessions.append(session_id)
+        if session.user_id == ctx.author.id:
+            user_session = session
             del active_sessions[session_id]
+            break
     
-    await ctx.send(f'cleaned up {len(expired_sessions)} expired sessions')
+    if user_session:
+        embed = discord.Embed(
+            title='✅ Session Cancelled',
+            description=f'Session `{user_session.session_id}` has been cancelled.',
+            color=0xFF4444
+        )
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send('❌ No active session found to cancel.')
 
-@bot.command(name='test')
-async def test_command(ctx):
-    """quick test command"""
+@bot.command(name='help_send')
+async def help_command(ctx):
+    """Show help information"""
     authorized_users = [728201873366056992]
     
     if ctx.author.id not in authorized_users:
-        await ctx.send('nah')
+        await ctx.send('❌ You are not authorized to use this command.')
         return
     
-    # basic info
-    await ctx.send(f'yo {ctx.author.display_name}')
-    await ctx.send(f'guild: {ctx.guild.name}')
-    await ctx.send(f'channel: {ctx.channel.name}')
-    await ctx.send(f'members: {len(ctx.guild.members)}')
-    
-    # test session creation
-    test_session = MessageSession(ctx.author.id, ctx.channel.id, ctx.guild.id)
-    await ctx.send(f'session test: {test_session.session_id}')
-    
-    # test templates
-    await ctx.send(f'templates loaded: {len(message_templates)}')
-    
-    # test stats
-    if ctx.author.id in send_statistics:
-        stats = send_statistics[ctx.author.id]
-        await ctx.send(f'your stats: sent {stats["total_sent"]} failed {stats["total_failed"]}')
-    else:
-        await ctx.send('no stats yet')
-    
-    await ctx.send('all good')
-
-# Configuration
-TARGET_ROLE_ID = 1382280238842515587
-GUILD_ID = 1122152849833459842  # Your server ID
-EVENT_LINK = 'https://discord.com/events/1122152849833459842/1384531945312227389'
-GAME_LINK = 'https://www.roblox.com/games/13550599465/Trenches'
-BATTLE_TIMESTAMP = '<t:1750507200:t>'  # This will show in user's timezone
-
-class BattleButtons(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)  # Buttons won't timeout
-        
-        # Add Game Link Button
-        game_button = discord.ui.Button(
-            label='🎮 Join Game',
-            style=discord.ButtonStyle.primary,
-            url=GAME_LINK
-        )
-        self.add_item(game_button)
-        
-        # Add Event Link Button  
-        event_button = discord.ui.Button(
-            label='📅 View Event',
-            style=discord.ButtonStyle.secondary,
-            url=EVENT_LINK
-        )
-        self.add_item(event_button)
-
-async def send_battle_notifications():
-    """Send battle notifications to all users with the target role"""
-    try:
-        print('starting notifications')
-        
-        # Get the guild
-        guild = bot.get_guild(GUILD_ID)
-        if not guild:
-            print('guild not found')
-            return
-        
-        # Fetch all members to ensure we have complete member data
-        await guild.chunk()
-        
-        # Find the target role
-        target_role = guild.get_role(TARGET_ROLE_ID)
-        if not target_role:
-            print('role not found')
-            return
-        
-        print(f'found role: {target_role.name} with {len(target_role.members)} members')
-        
-        # Create the embed message (without link fields)
-        embed = discord.Embed(
-            title='🔥 Battle Alert!',
-            description=f"There will be a battle happening later today at {BATTLE_TIMESTAMP}! (this time is converted to your own time)",
-            color=0xFF4444,
-            timestamp=discord.utils.utcnow()
-        )
-        
-        embed.add_field(
-            name='✅ Can Attend?',
-            value='Press "Interested" on the event and ping <@.iloh>',
-            inline=False
-        )
-        
-        embed.add_field(
-            name='❌ Cannot Attend?',
-            value='Ping <@.iloh> and let them know you cannot attend (no reason needed)',
-            inline=False
-        )
-        
-        embed.set_footer(text='Battle Notification System')
-        
-        # Create the button view
-        view = BattleButtons()
-        
-        success_count = 0
-        fail_count = 0
-        
-        # Send DM to each member with the role
-        for member in target_role.members:
-            try:
-                await member.send(embed=embed, view=view)
-                print(f'sent dm to {member.display_name}')
-                success_count += 1
-                
-                # Add a small delay to avoid rate limiting
-                await asyncio.sleep(1)
-                
-            except discord.Forbidden:
-                print(f'dms disabled: {member.display_name}')
-                fail_count += 1
-            except discord.HTTPException as e:
-                print(f'http error {member.display_name}: {e}')
-                fail_count += 1
-            except Exception as e:
-                print(f'error {member.display_name}: {e}')
-                fail_count += 1
-        
-        print(f'summary: sent {success_count} failed {fail_count} total {len(target_role.members)}')
-        
-        return success_count, fail_count
-        
-    except Exception as e:
-        print(f'error in notifications: {e}')
-        return 0, 0
-
-@bot.command(name='sendi')
-async def send_battle_command(ctx):
-    """Command to trigger battle notifications"""
-    # Add your user ID here for permission check
-    authorized_users = [728201873366056992]  # Your Discord user ID
-    
-    if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
-        return
-    
-    await ctx.send('sending notifications')
-    
-    success, fail = await send_battle_notifications()
-    
-    await ctx.send(f'done. sent: {success} failed: {fail}')
-
-@bot.command(name='testicle')
-async def test_battle_command(ctx):
-    """Test command to send battle notification to yourself only"""
-    # Add your user ID here for permission check
-    authorized_users = [728201873366056992]  # Your Discord user ID
-    
-    if ctx.author.id not in authorized_users:
-        await ctx.send('not authorized')
-        return
-    
-    # Get your user object
-    try:
-        user = await bot.fetch_user(728201873366056992)
-    except:
-        await ctx.send('user not found')
-        return
-    
-    # Create the embed message (without link fields)
     embed = discord.Embed(
-        title='🔥 Battle Alert! (TEST)',
-        description=f"There will be a battle happening later today at {BATTLE_TIMESTAMP}! (this time is converted to your own time)",
-        color=0xFF4444,
-        timestamp=discord.utils.utcnow()
+        title='🤖 Message Delivery System - Help',
+        description='Advanced Discord message delivery system with batch processing and rate limiting.',
+        color=0x5865F2,
+        timestamp=datetime.utcnow()
     )
     
     embed.add_field(
-        name='✅ Can Attend?',
-        value='Press "Interested" on the event and ping <@.iloh>',
+        name='📨 Commands',
+        value='`!send` - Start message delivery process\n'
+              '`!sessions` - List active sessions\n'
+              '`!stats` - Show your statistics\n'
+              '`!cancel` - Cancel active session\n'
+              '`!help_send` - Show this help',
         inline=False
     )
     
     embed.add_field(
-        name='❌ Cannot Attend?',
-        value='Ping <@.iloh> and let them know you cannot attend (no reason needed)',
+        name='🎯 Target Selection',
+        value='• **By Role** - Select all members of a role\n'
+              '• **By Mentions** - Mention users directly\n'
+              '• **Custom List** - Provide user IDs',
         inline=False
     )
     
-    embed.set_footer(text='Battle Notification System - TEST MESSAGE')
+    embed.add_field(
+        name='🎨 Message Designs',
+        value='• **Plain Text** - Simple text message\n'
+              '• **Standard Embed** - Basic embed format\n'
+              '• **Professional** - Polished embed with branding\n'
+              '• **Alert Style** - Red alert embed for urgent messages',
+        inline=False
+    )
     
-    # Create the button view
-    view = BattleButtons()
+    embed.add_field(
+        name='📦 Batch Processing',
+        value='• **Small** - 5 messages per batch\n'
+              '• **Medium** - 10 messages per batch\n'
+              '• **Large** - 20 messages per batch\n'
+              '• **All at Once** - No batching (use carefully)',
+        inline=False
+    )
     
-    try:
-        await user.send(embed=embed, view=view)
-        await ctx.send('test sent')
-        print(f'test dm sent to {user.name}')
-    except discord.Forbidden:
-        await ctx.send('dms disabled')
-        print('test dm failed: dms disabled')
+    embed.add_field(
+        name='⚠️ Important Notes',
+        value='• Sessions expire after 15 minutes of inactivity\n'
+              '• Confirmation code required before sending\n'
+              '• Failed deliveries are tracked (usually DMs disabled)\n'
+              '• Rate limiting prevents Discord API abuse',
+        inline=False
+    )
+    
+    embed.set_footer(text='Professional Message Delivery System')
+    
+    await ctx.send(embed=embed)
+
+@bot.command(name='template')
+async def create_template(ctx, template_name: str = None, *, template_content: str = None):
+    """Create or list message templates"""
+    authorized_users = [728201873366056992]
+    
+    if ctx.author.id not in authorized_users:
+        await ctx.send('❌ You are not authorized to use this command.')
+        return
+    
+    if not template_name:
+        # List existing templates
+        embed = discord.Embed(
+            title='📋 Message Templates',
+            description='Available message templates:',
+            color=0x9932CC
+        )
+        
+        for name, template in message_templates.items():
+            embed.add_field(
+                name=f'🏷️ {name}',
+                value=f"**Title:** {template['title']}\n**Footer:** {template['footer']}",
+                inline=True
+            )
+        
+        embed.set_footer(text='Use !template <name> <content> to create new template')
+        await ctx.send(embed=embed)
+        return
+    
+    if not template_content:
+        await ctx.send('❌ Please provide template content. Usage: `!template <name> <content>`')
+        return
+    
+    # Create new template
+    message_templates[template_name.lower()] = {
+        'title': f'📢 {template_name.title()}',
+        'color': 0x5865F2,
+        'footer': f'{template_name.title()} Template',
+        'content': template_content
+    }
+    
+    embed = discord.Embed(
+        title='✅ Template Created',
+        description=f'Template `{template_name}` has been created successfully.',
+        color=0x00FF00
+    )
+    embed.add_field(name='Content Preview', value=template_content[:100] + '...' if len(template_content) > 100 else template_content, inline=False)
+    
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_command_error(ctx, error):
+    """Handle command errors"""
     if isinstance(error, commands.CommandNotFound):
         return  # Ignore unknown commands
-    print(f'command error: {error}')
+    
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f'❌ Missing required argument: `{error.param.name}`')
+    
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send(f'❌ Invalid argument provided: {str(error)}')
+    
+    elif isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f'❌ Command is on cooldown. Try again in {error.retry_after:.1f} seconds.')
+    
+    else:
+        print(f'Command error: {error}')
+        await ctx.send('❌ An unexpected error occurred. Please try again.')
 
-# Alternative: Auto-run when bot starts (uncomment if needed)
-"""
+# Background task to clean up expired sessions
+@bot.event
+async def setup_background_tasks():
+    """Set up background maintenance tasks"""
+    while not bot.is_closed():
+        try:
+            await cleanup_expired_sessions()
+            await asyncio.sleep(300)  # Clean up every 5 minutes
+        except Exception as e:
+            print(f'Background task error: {e}')
+            await asyncio.sleep(60)
+
+# Start background tasks when bot is ready
 @bot.event
 async def on_ready():
-    print(f'✅ Bot is ready! Logged in as {bot.user}')
+    print(f'Bot ready: {bot.user}')
+    print(f'Guilds: {len(bot.guilds)}')
+    await load_message_templates()
+    await load_user_preferences()
+    print('System ready')
     
-    # Wait a bit for everything to load, then send notifications
-    await asyncio.sleep(5)
-    await send_battle_notifications()
-"""
+    # Start background tasks
+    bot.loop.create_task(setup_background_tasks())
+
+# Enhanced error handling for message sending
+async def safe_send_message(target, message_data):
+    """Safely send message with comprehensive error handling"""
+    try:
+        if message_data['type'] == 'text':
+            await target.send(message_data['content'])
+        else:
+            await target.send(embed=message_data['embed'])
+        return True, None
+    
+    except discord.Forbidden:
+        return False, 'DMs disabled'
+    except discord.HTTPException as e:
+        return False, f'HTTP error: {e.code}'
+    except discord.NotFound:
+        return False, 'User not found'
+    except Exception as e:
+        return False, f'Unexpected error: {str(e)}'
+
+# Data persistence functions
+async def save_user_data():
+    """Save user preferences and statistics to file"""
+    try:
+        data = {
+            'user_preferences': user_preferences,
+            'send_statistics': send_statistics,
+            'message_templates': message_templates
+        }
+        
+        # Convert datetime objects to strings for JSON serialization
+        for user_id, stats in data['send_statistics'].items():
+            if stats.get('last_send'):
+                stats['last_send'] = stats['last_send'].isoformat()
+        
+        with open('bot_data.json', 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        print('User data saved successfully')
+        
+    except Exception as e:
+        print(f'Error saving user data: {e}')
+
+async def load_user_data():
+    """Load user preferences and statistics from file"""
+    try:
+        if os.path.exists('bot_data.json'):
+            with open('bot_data.json', 'r') as f:
+                data = json.load(f)
+            
+            global user_preferences, send_statistics, message_templates
+            
+            user_preferences.update(data.get('user_preferences', {}))
+            send_statistics.update(data.get('send_statistics', {}))
+            message_templates.update(data.get('message_templates', {}))
+            
+            # Convert datetime strings back to datetime objects
+            for user_id, stats in send_statistics.items():
+                if stats.get('last_send'):
+                    stats['last_send'] = datetime.fromisoformat(stats['last_send'])
+            
+            print('User data loaded successfully')
+        else:
+            print('No existing data file found')
+            
+    except Exception as e:
+        print(f'Error loading user data: {e}')
+
+# Graceful shutdown
+@bot.event
+async def on_disconnect():
+    """Handle bot disconnect"""
+    print('Bot disconnected, saving data...')
+    await save_user_data()
 
 # Run the bot
-if __name__ == "__main__":
-    # Get token from environment variable
-    token = os.getenv('DISCORD_TOKEN') or os.getenv('BOT_TOKEN')
+if __name__ == '__main__':
+    # Load existing data on startup
+    asyncio.get_event_loop().run_until_complete(load_user_data())
     
-    if not token:
-        print("Error: No bot token found in environment variables!")
-        print("Please set DISCORD_TOKEN or BOT_TOKEN environment variable")
+    # Get bot token from environment variable
+    bot_token = os.getenv('DISCORD_BOT_TOKEN')
+    
+    if not bot_token:
+        print('Error: DISCORD_BOT_TOKEN environment variable not set')
         exit(1)
     
-    bot.run(token)
+    try:
+        bot.run(bot_token)
+    except discord.LoginFailure:
+        print('Error: Invalid bot token')
+    except Exception as e:
+        print(f'Error starting bot: {e}')
+    finally:
+        # Save data on exit
+        asyncio.get_event_loop().run_until_complete(save_user_data())
