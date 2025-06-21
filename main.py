@@ -968,7 +968,47 @@ async def system_info(ctx):
     
     await ctx.send(embed=embed)
 
+# test command
+@bot.command(name='test')
+async def test_command(ctx):
+    """test if bot is working"""
+    authorized_users = [728201873366056992]
+    
+    if ctx.author.id not in authorized_users:
+        await ctx.send('nah ur not allowed lol')
+        return
+    
+    embed = discord.Embed(
+        title='yo the bot is working',
+        description='checking if everything is good...',
+        color=0x00FF00,
+        timestamp=datetime.now(UTC)
+    )
+    
+    embed.add_field(name='bot online', value='yeah its working', inline=False)
+    embed.add_field(name='templates', value=f'{len(message_templates)} loaded', inline=True)
+    embed.add_field(name='active stuff', value=f'{len(active_sessions)} sessions running', inline=True)
+    embed.add_field(name='ur authorized', value='yep ur good', inline=True)
+    embed.add_field(name='servers', value=f'connected to {len(bot.guilds)} servers', inline=True)
+    embed.add_field(name='ping', value=f'{bot.latency*1000:.1f}ms', inline=True)
+    embed.add_field(name='stats', value=f'{len(send_statistics)} users tracked', inline=True)
+    
+    embed.set_footer(text='everything looks good')
+    
+    await ctx.send(embed=embed)
 
+# ping command
+@bot.command(name='ping')
+async def ping_command(ctx):
+    """simple ping"""
+    authorized_users = [728201873366056992]
+    
+    if ctx.author.id not in authorized_users:
+        await ctx.send('nope')
+        return
+    
+    latency = bot.latency * 1000
+    await ctx.send(f'pong! {latency:.1f}ms')
         
 
 # Graceful shutdown
