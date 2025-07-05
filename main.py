@@ -1009,7 +1009,126 @@ async def ping_command(ctx):
     
     latency = bot.latency * 1000
     await ctx.send(f'pong! {latency:.1f}ms')
+
+@bot.command(name='serverinfo')
+async def server_info(ctx, server_id: int = None):
+    """Send detailed server information to user's DM"""
+    
+    # If used in a server without server_id, use current server
+    if ctx.guild and not server_id:
+        guild = ctx.guild
+    # If server_id is provided, get that server
+    elif server_id:
+        guild = bot.get_guild(server_id)
+        if not guild:
+            await ctx.send("❌ I couldn't find a server with that ID, or I'm not in that server!")
+            return
+    else:
+        await ctx.send("❌ Please provide a server ID when using this command in DMs!\nUsage: `!serverinfo <server_id>`")
+        return
+    
+    # Check if user is in the server (for security)
+    if not guild.get_member(ctx.author.id):
+        await ctx.send("❌ You must be a member of that server to get its information!")
+        return
+    
+    try:
+        # Create embed for server info
+        embed = discord.Embed(
+            title=f"📊 Server Information: {guild.name}",
+            color=discord.Color.blue(),
+            timestamp=datetime.utcnow()
+        )
         
+        # Basic server info
+        embed.add_field(
+            name="🏷️ Basic Info",
+            value=f"**Name:** {guild.name}\n"
+                  f"**ID:** {guild.id}\n"
+                  f"**Owner:** {guild.owner.mention if guild.owner else 'Unknown'}\n"
+                  f"**Created:** {guild.created_at.strftime('%B %d, %Y')}\n"
+                  f"**Members:** {guild.member_count}\n"
+                  f"**Verification Level:** {guild.verification_level}",
+            inline=False
+        )
+        
+        # Channel information
+        text_channels = [ch.name for ch in guild.text_channels]
+        voice_channels = [ch.name for ch in guild.voice_channels]
+        categories = [cat.name for cat in guild.categories]
+        
+        channels_info = f"**Text Channels ({len(text_channels)}):**\n"
+        channels_info += ", ".join(text_channels[:20])  # Limit to first 20
+        if len(text_channels) > 20:
+            channels_info += f"\n... and {len(text_channels) - 20} more"
+        
+        channels_info += f"\n\n**Voice Channels ({len(voice_channels)}):**\n"
+        channels_info += ", ".join(voice_channels[:20])
+        if len(voice_channels) > 20:
+            channels_info += f"\n... and {len(voice_channels) - 20} more"
+        
+        if categories:
+            channels_info += f"\n\n**Categories ({len(categories)}):**\n"
+            channels_info += ", ".join(categories[:10])
+            if len(categories) > 10:
+                channels_info += f"\n... and {len(categories) - 10} more"
+        
+        embed.add_field(
+            name="📝 Channels",
+            value=channels_info[:1024],  # Discord embed field limit
+            inline=False
+        )
+        
+        # Role information
+        roles = [role.name for role in guild.roles if role.name != "@everyone"]
+        roles_info = f"**Roles ({len(roles)}):**\n"
+        roles_info += ", ".join(roles[:30])  # Limit to first 30
+        if len(roles) > 30:
+            roles_info += f"\n... and {len(roles) - 30} more"
+        
+        embed.add_field(
+            name="🎭 Roles",
+            value=roles_info[:1024],
+            inline=False
+        )
+        
+        # Emojis
+        emojis = [str(emoji) for emoji in guild.emojis]
+        if emojis:
+            emoji_info = f"**Custom Emojis ({len(emojis)}):**\n"
+            emoji_info += "".join(emojis[:50])  # Show first 50 emojis
+            if len(emojis) > 50:
+                emoji_info += f"\n... and {len(emojis) - 50} more"
+            
+            embed.add_field(
+                name="😀 Emojis",
+                value=emoji_info[:1024],
+                inline=False
+            )
+        
+        # Features
+        features = guild.features
+        if features:
+            feature_list = ", ".join([f.replace("_", " ").title() for f in features])
+            embed.add_field(
+                name="✨ Server Features",
+                value=feature_list[:1024],
+                inline=False
+            )
+        
+        # Set server icon as thumbnail
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+        
+        # Send DM
+        try:
+            await ctx.author.send(embed=embed)
+            await ctx.send("📬 Server information sent to your DM!")
+        except discord.Forbidden:
+            await ctx.send("❌ I couldn't send you a DM. Please check your privacy settings.")
+    
+    except Exception as e:
+        await ctx.send(f"❌ An error occurred: {str(e)}")
 
 # Graceful shutdown
 @bot.event
