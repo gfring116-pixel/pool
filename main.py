@@ -1193,6 +1193,370 @@ async def server_info(ctx, server_id: int = None):
     except Exception as e:
         await ctx.send(f"❌ An error occurred: {str(e)}")
 
+# In-memory storage for backups (you should use a database for production)
+server_backups = {}
+
+# Auto-backup system
+@bot.event
+async def on_ready():
+    print(f'{bot.user} is ready!')
+    # Start auto-backup task
+    bot.loop.create_task(auto_backup_loop())
+
+async def auto_backup_loop():
+    """Automatically backup servers every 6 hours"""
+    while True:
+        try:
+            for guild in bot.guilds:
+                await create_backup(guild)
+            print(f"Auto-backup completed for {len(bot.guilds)} servers")
+        except Exception as e:
+            print(f"Auto-backup error: {e}")
+        
+        # Wait 6 hours before next backup
+        await asyncio.sleep(21600)
+
+async def create_backup(guild):
+    """Create a comprehensive backup of a server"""
+    backup_data = {
+        'guild_id': guild.id,
+        'guild_name': guild.name,
+        'backup_time': datetime.utcnow().isoformat(),
+        'categories': [],
+        'channels': [],
+        'roles': [],
+        'emojis': [],
+        'guild_settings': {}
+    }
+    
+    # Backup guild settings
+    backup_data['guild_settings'] = {
+        'name': guild.name,
+        'description': guild.description,
+        'verification_level': str(guild.verification_level),
+        'default_notifications': str(guild.default_notifications),
+        'explicit_content_filter': str(guild.explicit_content_filter),
+        'afk_timeout': guild.afk_timeout,
+        'afk_channel_id': guild.afk_channel.id if guild.afk_channel else None,
+        'system_channel_id': guild.system_channel.id if guild.system_channel else None,
+        'icon_url': str(guild.icon.url) if guild.icon else None,
+        'banner_url': str(guild.banner.url) if guild.banner else None
+    }
+    
+    # Backup categories
+    for category in guild.categories:
+        cat_data = {
+            'id': category.id,
+            'name': category.name,
+            'position': category.position,
+            'overwrites': []
+        }
+        
+        # Backup permission overwrites
+        for target, overwrite in category.overwrites.items():
+            cat_data['overwrites'].append({
+                'id': target.id,
+                'type': 'role' if isinstance(target, discord.Role) else 'member',
+                'allow': overwrite.pair()[0].value,
+                'deny': overwrite.pair()[1].value
+            })
+        
+        backup_data['categories'].append(cat_data)
+    
+    # Backup channels
+    for channel in guild.channels:
+        if isinstance(channel, discord.CategoryChannel):
+            continue
+            
+        channel_data = {
+            'id': channel.id,
+            'name': channel.name,
+            'type': str(channel.type),
+            'position': channel.position,
+            'category_id': channel.category.id if channel.category else None,
+            'overwrites': []
+        }
+        
+        # Channel-specific data
+        if isinstance(channel, discord.TextChannel):
+            channel_data.update({
+                'topic': channel.topic,
+                'slowmode_delay': channel.slowmode_delay,
+                'nsfw': channel.nsfw,
+                'news': channel.is_news()
+            })
+        elif isinstance(channel, discord.VoiceChannel):
+            channel_data.update({
+                'bitrate': channel.bitrate,
+                'user_limit': channel.user_limit,
+                'rtc_region': channel.rtc_region
+            })
+        
+        # Backup permission overwrites
+        for target, overwrite in channel.overwrites.items():
+            channel_data['overwrites'].append({
+                'id': target.id,
+                'type': 'role' if isinstance(target, discord.Role) else 'member',
+                'allow': overwrite.pair()[0].value,
+                'deny': overwrite.pair()[1].value
+            })
+        
+        backup_data['channels'].append(channel_data)
+    
+    # Backup roles
+    for role in guild.roles:
+        if role.name == "@everyone":
+            continue
+            
+        role_data = {
+            'id': role.id,
+            'name': role.name,
+            'color': role.color.value,
+            'hoist': role.hoist,
+            'mentionable': role.mentionable,
+            'permissions': role.permissions.value,
+            'position': role.position
+        }
+        backup_data['roles'].append(role_data)
+    
+    # Backup emojis
+    for emoji in guild.emojis:
+        emoji_data = {
+            'id': emoji.id,
+            'name': emoji.name,
+            'url': str(emoji.url),
+            'animated': emoji.animated,
+            'roles': [role.id for role in emoji.roles]
+        }
+        backup_data['emojis'].append(emoji_data)
+    
+    # Store backup
+    server_backups[guild.id] = backup_data
+    
+    # Save to file as well (optional)
+    if not os.path.exists('backups'):
+        os.makedirs('backups')
+    
+    with open(f'backups/{guild.id}_backup.json', 'w') as f:
+        json.dump(backup_data, f, indent=2)
+
+@bot.command(name='backup')
+@commands.has_permissions(administrator=True)
+async def manual_backup(ctx):
+    """Manually create a backup of the server"""
+    try:
+        await create_backup(ctx.guild)
+        embed = discord.Embed(
+            title="✅ Backup Created",
+            description=f"Successfully created backup for **{ctx.guild.name}**",
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow()
+        )
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"❌ Error creating backup: {str(e)}")
+
+@bot.command(name='restore')
+@commands.has_permissions(administrator=True)
+async def restore_server(ctx, backup_id: str = None):
+    """Restore server from backup"""
+    guild_id = ctx.guild.id
+    
+    if guild_id not in server_backups:
+        await ctx.send("❌ No backup found for this server!")
+        return
+    
+    # Confirmation
+    embed = discord.Embed(
+        title="⚠️ Server Restore Confirmation",
+        description="**WARNING:** This will restore the server to a previous state.\n\n"
+                   "This action will:\n"
+                   "• Delete all current channels and categories\n"
+                   "• Delete all current roles (except @everyone)\n"
+                   "• Recreate channels, categories, and roles from backup\n"
+                   "• Restore permissions and settings\n\n"
+                   "**This cannot be undone!**\n\n"
+                   "React with ✅ to confirm or ❌ to cancel.",
+        color=discord.Color.red()
+    )
+    
+    msg = await ctx.send(embed=embed)
+    await msg.add_reaction('✅')
+    await msg.add_reaction('❌')
+    
+    def check(reaction, user):
+        return user == ctx.author and str(reaction.emoji) in ['✅', '❌'] and reaction.message.id == msg.id
+    
+    try:
+        reaction, user = await bot.wait_for('reaction_add', timeout=30.0, check=check)
+    except asyncio.TimeoutError:
+        await ctx.send("❌ Restore cancelled - timeout")
+        return
+    
+    if str(reaction.emoji) == '❌':
+        await ctx.send("❌ Restore cancelled")
+        return
+    
+    # Start restoration
+    await ctx.send("🔄 Starting server restoration... This may take a while.")
+    
+    try:
+        await restore_from_backup(ctx.guild, server_backups[guild_id])
+        
+        embed = discord.Embed(
+            title="✅ Server Restored",
+            description=f"Successfully restored **{ctx.guild.name}** from backup",
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow()
+        )
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error during restoration: {str(e)}")
+
+async def restore_from_backup(guild, backup_data):
+    """Restore server from backup data"""
+    
+    # Step 1: Delete existing channels (except the one we're using)
+    for channel in guild.channels:
+        if channel.id != guild.channels[0].id:  # Keep first channel for communication
+            try:
+                await channel.delete(reason="Server restoration")
+            except:
+                pass
+    
+    # Step 2: Delete existing roles (except @everyone and bot roles)
+    for role in guild.roles:
+        if role.name != "@everyone" and not role.managed:
+            try:
+                await role.delete(reason="Server restoration")
+            except:
+                pass
+    
+    # Step 3: Recreate roles
+    role_mapping = {}
+    for role_data in sorted(backup_data['roles'], key=lambda x: x['position']):
+        try:
+            new_role = await guild.create_role(
+                name=role_data['name'],
+                color=discord.Color(role_data['color']),
+                hoist=role_data['hoist'],
+                mentionable=role_data['mentionable'],
+                permissions=discord.Permissions(role_data['permissions']),
+                reason="Server restoration"
+            )
+            role_mapping[role_data['id']] = new_role
+        except Exception as e:
+            print(f"Error creating role {role_data['name']}: {e}")
+    
+    # Step 4: Recreate categories
+    category_mapping = {}
+    for cat_data in sorted(backup_data['categories'], key=lambda x: x['position']):
+        try:
+            overwrites = {}
+            for ow in cat_data['overwrites']:
+                target = None
+                if ow['type'] == 'role':
+                    target = role_mapping.get(ow['id']) or guild.get_role(ow['id'])
+                else:
+                    target = guild.get_member(ow['id'])
+                
+                if target:
+                    overwrites[target] = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(ow['allow']),
+                        discord.Permissions(ow['deny'])
+                    )
+            
+            category = await guild.create_category(
+                name=cat_data['name'],
+                overwrites=overwrites,
+                reason="Server restoration"
+            )
+            category_mapping[cat_data['id']] = category
+        except Exception as e:
+            print(f"Error creating category {cat_data['name']}: {e}")
+    
+    # Step 5: Recreate channels
+    for channel_data in sorted(backup_data['channels'], key=lambda x: x['position']):
+        try:
+            overwrites = {}
+            for ow in channel_data['overwrites']:
+                target = None
+                if ow['type'] == 'role':
+                    target = role_mapping.get(ow['id']) or guild.get_role(ow['id'])
+                else:
+                    target = guild.get_member(ow['id'])
+                
+                if target:
+                    overwrites[target] = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(ow['allow']),
+                        discord.Permissions(ow['deny'])
+                    )
+            
+            category = category_mapping.get(channel_data['category_id'])
+            
+            if channel_data['type'] == 'ChannelType.text':
+                await guild.create_text_channel(
+                    name=channel_data['name'],
+                    category=category,
+                    overwrites=overwrites,
+                    topic=channel_data.get('topic'),
+                    slowmode_delay=channel_data.get('slowmode_delay', 0),
+                    nsfw=channel_data.get('nsfw', False),
+                    news=channel_data.get('news', False),
+                    reason="Server restoration"
+                )
+            elif channel_data['type'] == 'ChannelType.voice':
+                await guild.create_voice_channel(
+                    name=channel_data['name'],
+                    category=category,
+                    overwrites=overwrites,
+                    bitrate=channel_data.get('bitrate', 64000),
+                    user_limit=channel_data.get('user_limit', 0),
+                    rtc_region=channel_data.get('rtc_region'),
+                    reason="Server restoration"
+                )
+        except Exception as e:
+            print(f"Error creating channel {channel_data['name']}: {e}")
+
+@bot.command(name='backupinfo')
+@commands.has_permissions(administrator=True)
+async def backup_info(ctx):
+    """Show backup information"""
+    guild_id = ctx.guild.id
+    
+    if guild_id not in server_backups:
+        await ctx.send("❌ No backup found for this server!")
+        return
+    
+    backup = server_backups[guild_id]
+    
+    embed = discord.Embed(
+        title="📋 Backup Information",
+        color=discord.Color.blue(),
+        timestamp=datetime.fromisoformat(backup['backup_time'])
+    )
+    
+    embed.add_field(
+        name="📊 Server Stats",
+        value=f"**Categories:** {len(backup['categories'])}\n"
+              f"**Channels:** {len(backup['channels'])}\n"
+              f"**Roles:** {len(backup['roles'])}\n"
+              f"**Emojis:** {len(backup['emojis'])}",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🕒 Backup Time",
+        value=f"<t:{int(datetime.fromisoformat(backup['backup_time']).timestamp())}:R>",
+        inline=True
+    )
+    
+    embed.set_footer(text="Use !restore to restore from this backup")
+    
+    await ctx.send(embed=embed)
+
+
 # Graceful shutdown
 @bot.event
 async def on_disconnect():
