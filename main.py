@@ -1057,54 +1057,107 @@ async def server_info(ctx, server_id: int = None):
         voice_channels = [ch.name for ch in guild.voice_channels]
         categories = [cat.name for cat in guild.categories]
         
-        channels_info = f"**Text Channels ({len(text_channels)}):**\n"
-        channels_info += ", ".join(text_channels[:20])  # Limit to first 20
-        if len(text_channels) > 20:
-            channels_info += f"\n... and {len(text_channels) - 20} more"
+        # Send multiple messages if content is too long
+        messages_to_send = []
         
-        channels_info += f"\n\n**Voice Channels ({len(voice_channels)}):**\n"
-        channels_info += ", ".join(voice_channels[:20])
-        if len(voice_channels) > 20:
-            channels_info += f"\n... and {len(voice_channels) - 20} more"
-        
-        if categories:
-            channels_info += f"\n\n**Categories ({len(categories)}):**\n"
-            channels_info += ", ".join(categories[:10])
-            if len(categories) > 10:
-                channels_info += f"\n... and {len(categories) - 10} more"
-        
+        # Basic info embed
         embed.add_field(
-            name="📝 Channels",
-            value=channels_info[:1024],  # Discord embed field limit
+            name="📝 Text Channels",
+            value=", ".join(text_channels) if text_channels else "None",
             inline=False
         )
+        
+        embed.add_field(
+            name="🔊 Voice Channels", 
+            value=", ".join(voice_channels) if voice_channels else "None",
+            inline=False
+        )
+        
+        if categories:
+            embed.add_field(
+                name="📂 Categories",
+                value=", ".join(categories),
+                inline=False
+            )
         
         # Role information
         roles = [role.name for role in guild.roles if role.name != "@everyone"]
-        roles_info = f"**Roles ({len(roles)}):**\n"
-        roles_info += ", ".join(roles[:30])  # Limit to first 30
-        if len(roles) > 30:
-            roles_info += f"\n... and {len(roles) - 30} more"
-        
-        embed.add_field(
-            name="🎭 Roles",
-            value=roles_info[:1024],
-            inline=False
-        )
+        if roles:
+            # Split roles into chunks if too long for one field
+            roles_text = ", ".join(roles)
+            if len(roles_text) > 1024:
+                # Split into multiple embeds
+                role_chunks = []
+                current_chunk = ""
+                for role in roles:
+                    if len(current_chunk + role + ", ") > 1024:
+                        role_chunks.append(current_chunk.rstrip(", "))
+                        current_chunk = role + ", "
+                    else:
+                        current_chunk += role + ", "
+                if current_chunk:
+                    role_chunks.append(current_chunk.rstrip(", "))
+                
+                # Add first chunk to main embed
+                embed.add_field(
+                    name=f"🎭 Roles ({len(roles)}) - Part 1",
+                    value=role_chunks[0],
+                    inline=False
+                )
+                
+                # Create additional embeds for remaining roles
+                for i, chunk in enumerate(role_chunks[1:], 2):
+                    role_embed = discord.Embed(
+                        title=f"🎭 Roles - Part {i}",
+                        description=chunk,
+                        color=discord.Color.blue()
+                    )
+                    messages_to_send.append(role_embed)
+            else:
+                embed.add_field(
+                    name=f"🎭 Roles ({len(roles)})",
+                    value=roles_text,
+                    inline=False
+                )
         
         # Emojis
         emojis = [str(emoji) for emoji in guild.emojis]
         if emojis:
-            emoji_info = f"**Custom Emojis ({len(emojis)}):**\n"
-            emoji_info += "".join(emojis[:50])  # Show first 50 emojis
-            if len(emojis) > 50:
-                emoji_info += f"\n... and {len(emojis) - 50} more"
-            
-            embed.add_field(
-                name="😀 Emojis",
-                value=emoji_info[:1024],
-                inline=False
-            )
+            emoji_text = "".join(emojis)
+            if len(emoji_text) > 1024:
+                # Split emojis into chunks
+                emoji_chunks = []
+                current_chunk = ""
+                for emoji in emojis:
+                    if len(current_chunk + str(emoji)) > 1024:
+                        emoji_chunks.append(current_chunk)
+                        current_chunk = str(emoji)
+                    else:
+                        current_chunk += str(emoji)
+                if current_chunk:
+                    emoji_chunks.append(current_chunk)
+                
+                # Add first chunk to main embed
+                embed.add_field(
+                    name=f"😀 Custom Emojis ({len(emojis)}) - Part 1",
+                    value=emoji_chunks[0],
+                    inline=False
+                )
+                
+                # Create additional embeds for remaining emojis
+                for i, chunk in enumerate(emoji_chunks[1:], 2):
+                    emoji_embed = discord.Embed(
+                        title=f"😀 Custom Emojis - Part {i}",
+                        description=chunk,
+                        color=discord.Color.blue()
+                    )
+                    messages_to_send.append(emoji_embed)
+            else:
+                embed.add_field(
+                    name=f"😀 Custom Emojis ({len(emojis)})",
+                    value=emoji_text,
+                    inline=False
+                )
         
         # Features
         features = guild.features
@@ -1122,10 +1175,20 @@ async def server_info(ctx, server_id: int = None):
         
         # Send DM
         try:
+            # Send main embed first
             await ctx.author.send(embed=embed)
-            await ctx.send("📬 Server information sent to your DM!")
+            
+            # Send additional embeds if any
+            for additional_embed in messages_to_send:
+                await ctx.author.send(embed=additional_embed)
+            
+            if ctx.guild:
+                await ctx.send("📬 Server information sent to your DM!")
         except discord.Forbidden:
-            await ctx.send("❌ I couldn't send you a DM. Please check your privacy settings.")
+            if ctx.guild:
+                await ctx.send("❌ I couldn't send you a DM. Please check your privacy settings.")
+            else:
+                await ctx.send("❌ I couldn't send you a DM. Please check your privacy settings.")
     
     except Exception as e:
         await ctx.send(f"❌ An error occurred: {str(e)}")
