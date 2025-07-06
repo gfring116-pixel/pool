@@ -29,6 +29,11 @@ RANKS = [
     {"id": 1207981849528246282, "name": "Recruit", "points": 0, "order": 1}
 ]
 
+# Bot configuration
+intents = discord.Intents.default()
+intents.message_content = True
+bot = discord.Bot(intents=intents)
+
 class MilitaryPointsSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -439,11 +444,20 @@ class MilitaryPointsSystem(commands.Cog):
 
         await ctx.respond(embed=embed)
 
+@bot.event
+async def on_ready():
+    print(f'{bot.user} has connected to Discord!')
+    print(f'Bot ID: {bot.user.id}')
+    print('------')
+
+# Add the cog to the bot
+bot.add_cog(MilitaryPointsSystem(bot))
+
 # Run the bot
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
     if not token:
-        print("Error: DISCORD_BOT_TOKEN not found in environment variables!")
+        print("Error: DISCORD_TOKEN not found in environment variables!")
         print("Please create a .env file with your bot token.")
         exit(1)
     
