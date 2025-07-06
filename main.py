@@ -151,7 +151,7 @@ class MilitaryPointsSystem(commands.Cog):
         return max(1, min(5, score))
 
     @discord.slash_command(name="award_points", description="Award points to a user for military event participation")
-    async def award_points(self, ctx, user: discord.Member, points: int = None, *, description: str):
+    async def award_points(self, ctx, user: discord.Member, description: str, points: int = None):
         """Award points to a user"""
         if not self.is_host(ctx.author):
             embed = discord.Embed(
