@@ -1,724 +1,828 @@
 import discord
 from discord.ext import commands
-import json
 import os
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime
 import asyncio
-import random
-from typing import Dict, List, Optional
 
-# Load environment variables
-from dotenv import load_dotenv
-load_dotenv()
+# Configure logging for security monitoring
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot_security.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# Configuration
-HOST_ROLES = [
+# Security: Authorized role IDs (users with these roles can use commands)
+AUTHORIZED_ROLES = {
     1255061914732597268,
-    1134711656811855942,
-    1279450222287655023
-]
+    1382604947924979793,
+    1279450222287655023,
+    1134711656811855942
+}
 
-RANKS = [
-    {"id": 1214438714508312596, "name": "Master Sergeant", "points": 80, "order": 8},
-    {"id": 1214438711379370034, "name": "Staff Sergeant", "points": 65, "order": 7},
-    {"id": 1207980354317844521, "name": "Sergeant Major", "points": 50, "order": 6},
-    {"id": 1207980351826173962, "name": "Sergeant", "points": 35, "order": 5, "requires_exam": True},
-    {"id": 1225058657507606600, "name": "Junior Sergeant", "points": 25, "order": 4},
-    {"id": 1208374047994281985, "name": "Corporal", "points": 15, "order": 3},
-    {"id": 1214438109173907546, "name": "Soldat", "points": 8, "order": 2},
-    {"id": 1207981849528246282, "name": "Recruit", "points": 0, "order": 1}
-]
+# Regiment role IDs and their corresponding prefixes
+REGIMENT_ROLES = {
+    '3rd': {'role_id': 1357959629359026267, 'prefix': '{3RD}', 'emoji': '🔵'},
+    '4th': {'role_id': 1251102603174215750, 'prefix': '{4TH}', 'emoji': '🔴'},
+    'mp': {'role_id': 1320153442244886598, 'prefix': '{MP}', 'emoji': '🟡'},
+    '1as': {'role_id': 1339571735028174919, 'prefix': '{1AS}', 'emoji': '🟢'},
+    '1st': {'role_id': 1387191982866038919, 'prefix': '{1ST}', 'emoji': '🟠'},
+    '6th': {'role_id': 1234503490886176849, 'prefix': '{6TH}', 'emoji': '🟣'}
+}
 
-# Bot configuration
+# Bot setup with strict intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
+intents.guilds = True
+
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Your Discord user ID
-OWNER_ID = 728201873366056992
-
-# Store the managed role ID (you can use a database for persistence)
-managed_role_id = None
-
-class MilitaryPointsSystem(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.data_file = 'military_data.json'
-        self.data = self.load_data()
-
-    def load_data(self):
-        """Load data from JSON file"""
-        try:
-            with open(self.data_file, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return {
-                "users": {},
-                "monthly_points": {},
-                "exams_passed": []
-            }
-
-    def save_data(self):
-        """Save data to JSON file"""
-        with open(self.data_file, 'w') as f:
-            json.dump(self.data, f, indent=2)
-
-    def is_host(self, member):
-        """Check if user has host permissions"""
-        return any(role.id in HOST_ROLES for role in member.roles)
-
-    def get_user_data(self, user_id):
-        """Get user's point data"""
-        user_id = str(user_id)
-        if user_id not in self.data["users"]:
-            self.data["users"][user_id] = {
-                "total_points": 0,
-                "monthly_points": {},
-                "point_history": []
-            }
-        return self.data["users"][user_id]
-
-    def get_current_month(self):
-        """Get current month string"""
-        return datetime.now().strftime("%Y-%m")
-
-    def add_points(self, user_id, points, reason, awarded_by):
-        """Add points to user"""
-        user_data = self.get_user_data(user_id)
-        current_month = self.get_current_month()
-
-        user_data["total_points"] += points
-
-        if current_month not in user_data["monthly_points"]:
-            user_data["monthly_points"][current_month] = 0
-        user_data["monthly_points"][current_month] += points
-
-        user_data["point_history"].append({
-            "points": points,
-            "reason": reason,
-            "awarded_by": awarded_by,
-            "timestamp": datetime.now().isoformat()
-        })
-
-        self.save_data()
-        return user_data["total_points"]
-
-    def get_user_rank(self, member):
-        """Get user's current rank"""
-        for rank in RANKS:
-            if member.get_role(rank["id"]):
-                return rank
-        return RANKS[-1]  # Return Recruit if no rank found
-
-    def get_next_rank(self, current_rank, total_points):
-        """Get next available rank and points needed"""
-        current_order = current_rank["order"]
-
-        for rank in sorted(RANKS, key=lambda x: x["order"]):
-            if rank["order"] > current_order and total_points >= rank["points"]:
-                # Check if it's Sergeant and requires exam
-                if rank.get("requires_exam", False):
-                    return rank, 0, True  # rank, points_needed, requires_exam
-                return rank, 0, False
-            elif rank["order"] > current_order:
-                points_needed = rank["points"] - total_points
-                return rank, points_needed, rank.get("requires_exam", False)
-
-        return None, 0, False
-
-    def ai_determine_points(self, description):
-        """AI-like function to determine points based on description"""
-        description = description.lower()
-
-        # Keywords and their point values
-        excellent_keywords = ["excellent", "outstanding", "exceptional", "amazing", "perfect", "flawless"]
-        good_keywords = ["good", "great", "well", "solid", "nice", "impressive", "active"]
-        average_keywords = ["okay", "decent", "fine", "adequate", "participated", "showed up"]
-        poor_keywords = ["late", "distracted", "minimal", "barely", "struggled", "poor"]
-
-        # Count positive and negative indicators
-        score = 3  # Base score
-
-        # Add points for excellent performance
-        if any(keyword in description for keyword in excellent_keywords):
-            score += 2
-        # Add points for good performance
-        elif any(keyword in description for keyword in good_keywords):
-            score += 1
-        # Subtract points for poor performance
-        elif any(keyword in description for keyword in poor_keywords):
-            score -= 1
-
-        # Check for specific military terms
-        if any(term in description for term in ["leadership", "initiative", "discipline", "teamwork"]):
-            score += 1
-
-        # Ensure score is within 1-5 range
-        return max(1, min(5, score))
-
-    @discord.slash_command(name="award_points", description="Award points to a user for military event participation")
-    async def award_points(self, ctx, user: discord.Member, description: str, points: int = None):
-        """Award points to a user"""
-        if not self.is_host(ctx.author):
-            embed = discord.Embed(
-                title="❌ Access Denied",
-                description="You don't have permission to award points.",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        # Use AI to determine points if not specified
-        if points is None:
-            points = self.ai_determine_points(description)
-        else:
-            # Ensure points are within valid range
-            points = max(1, min(5, points))
-
-        # Award points
-        total_points = self.add_points(user.id, points, description, ctx.author.id)
-
-        embed = discord.Embed(
-            title="🏅 Points Awarded",
-            description=f"**{user.mention}** has been awarded **{points} points**!",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Reason", value=description, inline=False)
-        embed.add_field(name="Total Points", value=f"{total_points} points", inline=True)
-        embed.add_field(name="This Month", value=f"{self.get_user_data(user.id)['monthly_points'].get(self.get_current_month(), 0)} points", inline=True)
-        embed.set_thumbnail(url=user.display_avatar.url)
-
-        await ctx.respond(embed=embed)
-
-    @discord.slash_command(name="my_points", description="Check your military points")
-    async def my_points(self, ctx):
-        """Check user's own points"""
-        user_data = self.get_user_data(ctx.author.id)
-        current_month = self.get_current_month()
-        monthly_points = user_data['monthly_points'].get(current_month, 0)
-
-        current_rank = self.get_user_rank(ctx.author)
-        next_rank, points_needed, requires_exam = self.get_next_rank(current_rank, user_data['total_points'])
-
-        embed = discord.Embed(
-            title="🎖️ Your Military Points",
-            color=discord.Color.blue()
-        )
-        embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        embed.add_field(name="Current Rank", value=current_rank['name'], inline=True)
-        embed.add_field(name="Total Points", value=f"{user_data['total_points']} points", inline=True)
-        embed.add_field(name="This Month", value=f"{monthly_points} points", inline=True)
-
-        if next_rank:
-            if requires_exam:
-                embed.add_field(name="Next Rank", value=f"{next_rank['name']} (Requires Exam)", inline=False)
-            elif points_needed > 0:
-                embed.add_field(name="Next Rank", value=f"{next_rank['name']} ({points_needed} points needed)", inline=False)
-            else:
-                embed.add_field(name="Ready for Promotion!", value=f"You can be promoted to {next_rank['name']}", inline=False)
-        else:
-            embed.add_field(name="Rank Status", value="Maximum rank achieved!", inline=False)
-
-        await ctx.respond(embed=embed)
-
-    @discord.slash_command(name="check_points", description="Check another user's military points")
-    async def check_points(self, ctx, user: discord.Member):
-        """Check another user's points"""
-        user_data = self.get_user_data(user.id)
-        current_month = self.get_current_month()
-        monthly_points = user_data['monthly_points'].get(current_month, 0)
-
-        current_rank = self.get_user_rank(user)
-        next_rank, points_needed, requires_exam = self.get_next_rank(current_rank, user_data['total_points'])
-
-        embed = discord.Embed(
-            title=f"🎖️ {user.display_name}'s Military Points",
-            color=discord.Color.blue()
-        )
-        embed.set_thumbnail(url=user.display_avatar.url)
-        embed.add_field(name="Current Rank", value=current_rank['name'], inline=True)
-        embed.add_field(name="Total Points", value=f"{user_data['total_points']} points", inline=True)
-        embed.add_field(name="This Month", value=f"{monthly_points} points", inline=True)
-
-        if next_rank:
-            if requires_exam:
-                embed.add_field(name="Next Rank", value=f"{next_rank['name']} (Requires Exam)", inline=False)
-            elif points_needed > 0:
-                embed.add_field(name="Next Rank", value=f"{next_rank['name']} ({points_needed} points needed)", inline=False)
-            else:
-                embed.add_field(name="Ready for Promotion!", value=f"Can be promoted to {next_rank['name']}", inline=False)
-        else:
-            embed.add_field(name="Rank Status", value="Maximum rank achieved!", inline=False)
-
-        await ctx.respond(embed=embed)
-
-    @discord.slash_command(name="leaderboard", description="View the military points leaderboard")
-    async def leaderboard(self, ctx, period: discord.Option(str, "Choose period", choices=["total", "monthly"]) = "total"):
-        """Show leaderboard for total or monthly points"""
-        current_month = self.get_current_month()
-        leaderboard_data = []
-
-        for user_id, user_data in self.data["users"].items():
-            try:
-                member = ctx.guild.get_member(int(user_id))
-                if member:
-                    if period == "total":
-                        points = user_data['total_points']
-                    else:
-                        points = user_data['monthly_points'].get(current_month, 0)
-
-                    current_rank = self.get_user_rank(member)
-                    leaderboard_data.append({
-                        'member': member,
-                        'points': points,
-                        'rank': current_rank['name']
-                    })
-            except:
-                continue
-
-        # Sort by points (descending)
-        leaderboard_data.sort(key=lambda x: x['points'], reverse=True)
-
-        embed = discord.Embed(
-            title=f"🏆 Military Points Leaderboard - {period.title()}",
-            color=discord.Color.gold()
-        )
-
-        if period == "monthly":
-            embed.description = f"Points for {datetime.now().strftime('%B %Y')}"
-
-        leaderboard_text = ""
-        for i, data in enumerate(leaderboard_data[:10], 1):
-            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            leaderboard_text += f"{medal} **{data['member'].display_name}** - {data['points']} points ({data['rank']})\n"
-
-        if leaderboard_text:
-            embed.add_field(name="Top 10", value=leaderboard_text, inline=False)
-        else:
-            embed.add_field(name="No Data", value="No points recorded yet!", inline=False)
-
-        await ctx.respond(embed=embed)
-
-    @discord.slash_command(name="promote", description="Promote a user to their next rank")
-    async def promote(self, ctx, user: discord.Member):
-        """Promote a user to next rank"""
-        if not self.is_host(ctx.author) and user != ctx.author:
-            embed = discord.Embed(
-                title="❌ Access Denied",
-                description="You can only promote yourself, or you need host permissions to promote others.",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        user_data = self.get_user_data(user.id)
-        current_rank = self.get_user_rank(user)
-        next_rank, points_needed, requires_exam = self.get_next_rank(current_rank, user_data['total_points'])
-
-        if not next_rank:
-            embed = discord.Embed(
-                title="❌ Promotion Not Available",
-                description=f"{user.display_name} is already at the maximum rank!",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-        if points_needed > 0:
-            embed = discord.Embed(
-                title="❌ Insufficient Points",
-                description=f"{user.display_name} needs {points_needed} more points to reach {next_rank['name']}.",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        if requires_exam and str(user.id) not in self.data["exams_passed"]:
-            embed = discord.Embed(
-                title="❌ Exam Required",
-                description=f"Promotion to {next_rank['name']} requires passing the sergeant exam first!",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        # Remove current rank and add new rank
-        try:
-            await user.remove_roles(ctx.guild.get_role(current_rank['id']))
-            await user.add_roles(ctx.guild.get_role(next_rank['id']))
-
-            embed = discord.Embed(
-                title="🎉 Promotion Successful!",
-                description=f"**{user.display_name}** has been promoted to **{next_rank['name']}**!",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="Previous Rank", value=current_rank['name'], inline=True)
-            embed.add_field(name="New Rank", value=next_rank['name'], inline=True)
-            embed.add_field(name="Total Points", value=f"{user_data['total_points']} points", inline=True)
-            embed.set_thumbnail(url=user.display_avatar.url)
-
-            await ctx.respond(embed=embed)
-        except discord.HTTPException as e:
-            embed = discord.Embed(
-                title="❌ Promotion Failed",
-                description=f"Failed to update roles: {str(e)}",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-
-    @discord.slash_command(name="pass_exam", description="Mark a user as having passed the sergeant exam")
-    async def pass_exam(self, ctx, user: discord.Member):
-        """Mark user as having passed sergeant exam"""
-        if not self.is_host(ctx.author):
-            embed = discord.Embed(
-                title="❌ Access Denied",
-                description="You don't have permission to mark exams as passed.",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        user_id = str(user.id)
-        if user_id not in self.data["exams_passed"]:
-            self.data["exams_passed"].append(user_id)
-            self.save_data()
-
-            embed = discord.Embed(
-                title="✅ Exam Passed",
-                description=f"**{user.display_name}** has been marked as having passed the sergeant exam!",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="Status", value="Can now be promoted to Sergeant rank", inline=False)
-            await ctx.respond(embed=embed)
-        else:
-            embed = discord.Embed(
-                title="ℹ️ Already Passed",
-                description=f"{user.display_name} has already passed the sergeant exam.",
-                color=discord.Color.blue()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-
-    @discord.slash_command(name="point_history", description="View your recent point history")
-    async def point_history(self, ctx, user: discord.Member = None):
-        """View point history for self or another user"""
-        target_user = user or ctx.author
-
-        # Only allow checking others if you're a host
-        if user and not self.is_host(ctx.author):
-            embed = discord.Embed(
-                title="❌ Access Denied",
-                description="You can only view your own point history.",
-                color=discord.Color.red()
-            )
-            await ctx.respond(embed=embed, ephemeral=True)
-            return
-
-        user_data = self.get_user_data(target_user.id)
-        history = user_data.get('point_history', [])
-
-        if not history:
-            embed = discord.Embed(
-                title="📋 Point History",
-                description=f"No point history found for {target_user.display_name}",
-                color=discord.Color.blue()
-            )
-            await ctx.respond(embed=embed)
-            return
-
-        # Show last 10 entries
-        recent_history = history[-10:]
-
-        embed = discord.Embed(
-            title=f"📋 Point History - {target_user.display_name}",
-            color=discord.Color.blue()
-        )
-
-        history_text = ""
-        for entry in reversed(recent_history):
-            try:
-                awarded_by = ctx.guild.get_member(entry['awarded_by'])
-                awarded_by_name = awarded_by.display_name if awarded_by else "Unknown"
-                date = datetime.fromisoformat(entry['timestamp']).strftime('%m/%d/%Y')
-                history_text += f"**+{entry['points']}** - {entry['reason']}\n*{date} by {awarded_by_name}*\n\n"
-            except:
-                continue
-
-        if history_text:
-            embed.description = history_text[:4000]  # Discord embed limit
-        else:
-            embed.description = "No valid history entries found."
-
-        await ctx.respond(embed=embed)
-
-
-def is_owner():
-    """Check if the user is the bot owner"""
-    def predicate(ctx):
-        return ctx.author.id == OWNER_ID
+# Store ongoing enlistment processes
+enlistment_sessions = {}
+
+def is_authorized():
+    """Security check: Verify user has authorized roles"""
+    async def predicate(ctx):
+        user_role_ids = {role.id for role in ctx.author.roles}
+        has_permission = bool(AUTHORIZED_ROLES.intersection(user_role_ids))
+        
+        # Log all command attempts for security monitoring
+        logger.info(f"Command attempt by {ctx.author} (ID: {ctx.author.id}) - "
+                   f"Authorized: {has_permission} - Command: {ctx.command}")
+        
+        if not has_permission:
+            logger.warning(f"UNAUTHORIZED ACCESS ATTEMPT by {ctx.author} (ID: {ctx.author.id}) "
+                          f"in guild {ctx.guild.name} (ID: {ctx.guild.id})")
+            await ctx.send("❌ **Access Denied**: You don't have permission to use this command.")
+        
+        return has_permission
+    
     return commands.check(predicate)
 
-
-@bot.command(name='cheesecake')
-@is_owner()
-async def cheesecake(ctx, action=None, *, args=None):
-    """
-    Secret owner-only command for role management
-    Usage:
-    - cheesecake create <role_name> - Create a new role
-    - cheesecake delete - Delete the managed role
-    - cheesecake edit name <new_name> - Edit role name
-    - cheesecake edit color <hex_color> - Edit role color
-    - cheesecake edit permissions <permission_list> - Edit role permissions
-    - cheesecake info - Show role information
-    """
-    global managed_role_id
-
-if action is None:
-        embed = discord.Embed(
-            title="🍰 Cheesecake Role Manager",
-            description="Available actions: `create`, `delete`, `edit`, `info`",
-            color=discord.Color.gold()
-        )
-        embed.add_field(
-            name="Usage Examples:",
-            value=(
-                "```\n"
-                "cheesecake create My Special Role\n"
-                "cheesecake edit name New Role Name\n"
-                "cheesecake edit color #ff0000\n"
-                "cheesecake edit permissions administrator,manage_messages\n"
-                "cheesecake delete\n"
-                "cheesecake info\n"
-                "```"
-            ),
-            inline=False
-        )
-        await ctx.send(embed=embed)
-        return
-
-    # CREATE ROLE
-    if action.lower() == 'create':
-        if managed_role_id:
-            role = ctx.guild.get_role(managed_role_id)
-            if role:
-                await ctx.send("❌ You already have a managed role! Delete it first or edit it.")
-                return
-
-        if not args:
-            await ctx.send("❌ Please provide a role name: `cheesecake create <role_name>`")
-            return
-
-        try:
-            # Create role with basic permissions
-            role = await ctx.guild.create_role(
-                name=args,
-                color=discord.Color.blue(),
-                reason=f"Role created by owner {ctx.author}"
-            )
-            managed_role_id = role.id
-
-            # Give the role to the owner (you)
-            await ctx.author.add_roles(role, reason="Auto-assigned role to owner")
-
+class MemberSelectView(discord.ui.View):
+    def __init__(self, author_id, timeout=300):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.selected_member = None
+        self.message = None
+    
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Only the command user can interact with this.", ephemeral=True)
+            return False
+        return True
+    
+    async def on_timeout(self):
+        if self.message:
             embed = discord.Embed(
-                title="✅ Role Created",
-                description=f"Successfully created role: **{role.name}**\n🎉 Role has been assigned to you!",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="Role ID", value=str(role.id), inline=True)
-            embed.add_field(name="Color", value=str(role.color), inline=True)
-            await ctx.send(embed=embed)
-
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to create roles!")
-        except Exception as e:
-            await ctx.send(f"❌ Error creating role: {str(e)}")
-
-    # DELETE ROLE
-    elif action.lower() == 'delete':
-        if not managed_role_id:
-            await ctx.send("❌ No managed role found!")
-            return
-
-        role = ctx.guild.get_role(managed_role_id)
-        if not role:
-            await ctx.send("❌ Managed role not found in server!")
-            managed_role_id = None
-            return
-
-        try:
-            role_name = role.name
-            await role.delete(reason=f"Role deleted by owner {ctx.author}")
-            managed_role_id = None
-
-            embed = discord.Embed(
-                title="✅ Role Deleted",
-                description=f"Successfully deleted role: **{role_name}**",
+                title="⏰ **Session Timeout**",
+                description="The enlistment session has timed out.",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            await self.message.edit(embed=embed, view=None)
+        
+        # Clean up session data
+        if self.author_id in enlistment_sessions:
+            del enlistment_sessions[self.author_id]
 
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to delete this role!")
-        except Exception as e:
-            await ctx.send(f"❌ Error deleting role: {str(e)}")
-
-    # EDIT ROLE
-    elif action.lower() == 'edit':
-        if not managed_role_id:
-            await ctx.send("❌ No managed role found! Create one first.")
-            return
-
-        role = ctx.guild.get_role(managed_role_id)
-        if not role:
-            await ctx.send("❌ Managed role not found in server!")
-            managed_role_id = None
-            return
-
-        if not args:
-            await ctx.send("❌ Please specify what to edit: `name`, `color`, or `permissions`")
-            return
-
-        edit_parts = args.split(' ', 1)
-        if len(edit_parts) < 2:
-            await ctx.send("❌ Please provide a value to edit!")
-            return
-
-        edit_type = edit_parts[0].lower()
-        edit_value = edit_parts[1]
-
-        try:
-            if edit_type == 'name':
-                old_name = role.name
-                await role.edit(name=edit_value, reason=f"Name edited by owner {ctx.author}")
-                await ctx.send(f"✅ Role name changed from **{old_name}** to **{edit_value}**")
-
-            elif edit_type == 'color':
-                # Handle hex color
-                if edit_value.startswith('#'):
-                    color_value = int(edit_value[1:], 16)
-                else:
-                    color_value = int(edit_value, 16)
-
-                new_color = discord.Color(color_value)
-                await role.edit(color=new_color, reason=f"Color edited by owner {ctx.author}")
-                await ctx.send(f"✅ Role color changed to **{edit_value}**")
-
-            elif edit_type == 'permissions':
-                # Parse permissions
-                perm_list = [p.strip() for p in edit_value.split(',')]
-                permissions = discord.Permissions()
-
-                valid_perms = []
-                invalid_perms = []
-
-                for perm in perm_list:
-                    perm = perm.lower().replace(' ', '_')
-                    if hasattr(permissions, perm):
-                        setattr(permissions, perm, True)
-                        valid_perms.append(perm)
-                    else:
-                        invalid_perms.append(perm)
-
-                if valid_perms:
-                    await role.edit(permissions=permissions, reason=f"Permissions edited by owner {ctx.author}")
-
-                    embed = discord.Embed(
-                        title="✅ Permissions Updated",
-                        color=discord.Color.green()
-                    )
-                    embed.add_field(name="Valid Permissions", value=', '.join(valid_perms), inline=False)
-                    if invalid_perms:
-                        embed.add_field(name="Invalid Permissions", value=', '.join(invalid_perms), inline=False)
-                    await ctx.send(embed=embed)
-                else:
-                    await ctx.send("❌ No valid permissions found!")
-
-            else:
-                await ctx.send("❌ Invalid edit type! Use: `name`, `color`, or `permissions`")
-
-        except ValueError:
-            await ctx.send("❌ Invalid color format! Use hex format like #ff0000")
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to edit this role!")
-        except Exception as e:
-            await ctx.send(f"❌ Error editing role: {str(e)}")
-
-    # INFO ABOUT ROLE
-    elif action.lower() == 'info':
-        if not managed_role_id:
-            await ctx.send("❌ No managed role found!")
-            return
-
-        role = ctx.guild.get_role(managed_role_id)
-        if not role:
-            await ctx.send("❌ Managed role not found in server!")
-            managed_role_id = None
-            return
-
-        # Get enabled permissions
-        enabled_perms = [perm for perm, value in role.permissions if value]
-
-        embed = discord.Embed(
-            title="🍰 Role Information",
-            description=f"**{role.name}**",
-            color=role.color
+class MemberSelectModal(discord.ui.Modal):
+    def __init__(self, view):
+        super().__init__(title="Select Member to Enlist")
+        self.view = view
+        
+        self.member_input = discord.ui.TextInput(
+            label="Member",
+            placeholder="@username or User ID",
+            max_length=100,
+            required=True
         )
-        embed.add_field(name="ID", value=str(role.id), inline=True)
-        embed.add_field(name="Color", value=str(role.color), inline=True)
-        embed.add_field(name="Position", value=str(role.position), inline=True)
-        embed.add_field(name="Members", value=str(len(role.members)), inline=True)
-        embed.add_field(name="Mentionable", value="Yes" if role.mentionable else "No", inline=True)
-        embed.add_field(name="Hoisted", value="Yes" if role.hoist else "No", inline=True)
+        self.add_item(self.member_input)
+    
+    async def on_submit(self, interaction):
+        member_input = self.member_input.value.strip()
+        
+        # Try to find the member
+        member = None
+        guild = interaction.guild
+        
+        # Check if it's a mention
+        if member_input.startswith('<@') and member_input.endswith('>'):
+            member_id = member_input[2:-1]
+            if member_id.startswith('!'):
+                member_id = member_id[1:]
+            try:
+                member = guild.get_member(int(member_id))
+            except ValueError:
+                pass
+        
+        # Check if it's a user ID
+        if not member:
+            try:
+                member = guild.get_member(int(member_input))
+            except ValueError:
+                pass
+        
+        # Check if it's a username
+        if not member:
+            member = discord.utils.get(guild.members, name=member_input)
+        
+        # Check if it's a display name
+        if not member:
+            member = discord.utils.get(guild.members, display_name=member_input)
+        
+        if not member:
+            embed = discord.Embed(
+                title="❌ **Member Not Found**",
+                description="Could not find the specified member. Please try again.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=self.view)
+            return
+        
+        # Security checks
+        if member.bot:
+            embed = discord.Embed(
+                title="❌ **Invalid Target**",
+                description="Cannot enlist bots.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=self.view)
+            return
+        
+        if member.id == interaction.user.id:
+            embed = discord.Embed(
+                title="❌ **Security Error**",
+                description="You cannot enlist yourself.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=self.view)
+            return
+        
+        # Store the selected member
+        self.view.selected_member = member
+        enlistment_sessions[interaction.user.id] = {
+            'member': member,
+            'step': 'regiment_selection'
+        }
+        
+        # Move to regiment selection
+        await self.show_regiment_selection(interaction)
+    
+    async def show_regiment_selection(self, interaction):
+        embed = discord.Embed(
+            title="👤 **Member Selected**",
+            description=f"**Selected Member:** {self.view.selected_member.mention}\n\n"
+                       f"**Step 2/4:** Select the regiment to enlist them in:",
+            color=discord.Color.blue()
+        )
+        
+        # Check if member has existing regiment roles
+        current_regiments = []
+        for role in self.view.selected_member.roles:
+            for reg_name, reg_info in REGIMENT_ROLES.items():
+                if role.id == reg_info['role_id']:
+                    current_regiments.append(reg_name.upper())
+        
+        if current_regiments:
+            embed.add_field(
+                name="⚠️ **Current Regiments**",
+                value=f"This member is already in: {', '.join(current_regiments)}",
+                inline=False
+            )
+        
+        view = RegimentSelectView(interaction.user.id, self.view.selected_member)
+        await interaction.response.edit_message(embed=embed, view=view)
 
-        if enabled_perms:
-            perm_text = ', '.join(enabled_perms[:10])  # Limit to first 10
-            if len(enabled_perms) > 10:
-                perm_text += f" and {len(enabled_perms) - 10} more..."
-            embed.add_field(name="Permissions", value=perm_text, inline=False)
+class RegimentSelectView(discord.ui.View):
+    def __init__(self, author_id, member, timeout=300):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.member = member
+        self.message = None
+        
+        # Create buttons for each regiment
+        for reg_name, reg_info in REGIMENT_ROLES.items():
+            button = discord.ui.Button(
+                label=f"{reg_name.upper()} {reg_info['prefix']}",
+                emoji=reg_info['emoji'],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"regiment_{reg_name}"
+            )
+            button.callback = self.create_regiment_callback(reg_name)
+            self.add_item(button)
+        
+        # Add cancel button
+        cancel_button = discord.ui.Button(
+            label="Cancel",
+            emoji="❌",
+            style=discord.ButtonStyle.danger,
+            custom_id="cancel"
+        )
+        cancel_button.callback = self.cancel_callback
+        self.add_item(cancel_button)
+    
+    def create_regiment_callback(self, regiment_name):
+        async def callback(interaction):
+            await self.regiment_selected(interaction, regiment_name)
+        return callback
+    
+    async def regiment_selected(self, interaction, regiment_name):
+        # Update session data
+        enlistment_sessions[interaction.user.id]['regiment'] = regiment_name
+        enlistment_sessions[interaction.user.id]['step'] = 'roblox_username'
+        
+        # Show Roblox username input
+        await self.show_roblox_input(interaction, regiment_name)
+    
+    async def show_roblox_input(self, interaction, regiment_name):
+        embed = discord.Embed(
+            title="🎮 **Roblox Username Required**",
+            description=f"**Step 3/4:** Enter the Roblox username for {self.member.mention}",
+            color=discord.Color.green()
+        )
+        
+        embed.add_field(name="👤 **Member**", value=self.member.mention, inline=True)
+        embed.add_field(name="🎖️ **Regiment**", value=regiment_name.upper(), inline=True)
+        embed.add_field(name="📝 **Format**", value=f"`{REGIMENT_ROLES[regiment_name]['prefix']} (RobloxUsername)`", inline=False)
+        
+        view = RobloxUsernameView(interaction.user.id, self.member, regiment_name)
+        await interaction.response.edit_message(embed=embed, view=view)
+    
+    async def show_confirmation(self, interaction, regiment_name):
+        regiment_info = REGIMENT_ROLES[regiment_name]
+        
+        embed = discord.Embed(
+            title="✅ **Confirm Enlistment**",
+            description=f"**Step 3/3:** Please confirm the enlistment details:",
+            color=discord.Color.orange()
+        )
+        
+        embed.add_field(name="👤 **Member**", value=self.member.mention, inline=True)
+        embed.add_field(name="🎖️ **Regiment**", value=f"{regiment_name.upper()}", inline=True)
+        embed.add_field(name="🏷️ **New Prefix**", value=regiment_info['prefix'], inline=True)
+        
+        # Check for existing regiment roles
+        current_regiments = []
+        for role in self.member.roles:
+            for reg_name, reg_info in REGIMENT_ROLES.items():
+                if role.id == reg_info['role_id']:
+                    current_regiments.append(reg_name.upper())
+        
+        if current_regiments:
+            embed.add_field(
+                name="⚠️ **Note**",
+                value=f"This will remove existing regiment roles: {', '.join(current_regiments)}",
+                inline=False
+            )
+        
+        embed.set_footer(text="Click 'Confirm' to proceed or 'Cancel' to abort.")
+        
+        view = ConfirmationView(interaction.user.id, self.member, regiment_name)
+        await interaction.response.edit_message(embed=embed, view=view)
+    
+    async def cancel_callback(self, interaction):
+        embed = discord.Embed(
+            title="❌ **Cancelled**",
+            description="Enlistment process cancelled.",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        # Clean up session
+        if interaction.user.id in enlistment_sessions:
+            del enlistment_sessions[interaction.user.id]
+    
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Only the command user can interact with this.", ephemeral=True)
+            return False
+        return True
+    
+    async def on_timeout(self):
+        if self.message:
+            embed = discord.Embed(
+                title="⏰ **Session Timeout**",
+                description="The enlistment session has timed out.",
+                color=discord.Color.red()
+            )
+            await self.message.edit(embed=embed, view=None)
+        
+        # Clean up session data
+        if self.author_id in enlistment_sessions:
+            del enlistment_sessions[self.author_id]
 
-        await ctx.send(embed=embed)
+class RobloxUsernameView(discord.ui.View):
+    def __init__(self, author_id, member, regiment_name, timeout=300):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.member = member
+        self.regiment_name = regiment_name
+        self.message = None
+    
+    @discord.ui.button(label="Enter Roblox Username", emoji="🎮", style=discord.ButtonStyle.primary)
+    async def enter_roblox_button(self, interaction, button):
+        modal = RobloxUsernameModal(self)
+        await interaction.response.send_modal(modal)
+    
+    @discord.ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.danger)
+    async def cancel_button(self, interaction, button):
+        embed = discord.Embed(
+            title="❌ **Cancelled**",
+            description="Enlistment process cancelled.",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        # Clean up session
+        if interaction.user.id in enlistment_sessions:
+            del enlistment_sessions[interaction.user.id]
+    
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Only the command user can interact with this.", ephemeral=True)
+            return False
+        return True
+    
+    async def on_timeout(self):
+        if self.message:
+            embed = discord.Embed(
+                title="⏰ **Session Timeout**",
+                description="The enlistment session has timed out.",
+                color=discord.Color.red()
+            )
+            await self.message.edit(embed=embed, view=None)
+        
+        # Clean up session data
+        if self.author_id in enlistment_sessions:
+            del enlistment_sessions[self.author_id]
 
-    else:
-        await ctx.send("❌ Invalid action! Use: `create`, `delete`, `edit`, or `info`")
-
-
-# Available permissions for reference
-AVAILABLE_PERMISSIONS = [
-    "administrator", "create_instant_invite", "kick_members", "ban_members",
-    "manage_channels", "manage_guild", "add_reactions", "view_audit_log",
-    "priority_speaker", "stream", "read_messages", "send_messages",
-    "send_tts_messages", "manage_messages", "embed_links", "attach_files",
-    "read_message_history", "mention_everyone", "external_emojis", "view_guild_insights",
-    "connect", "speak", "mute_members", "deafen_members", "move_members",
-    "use_voice_activation", "change_nickname", "manage_nicknames", "manage_roles",
-    "manage_webhooks", "manage_emojis", "use_slash_commands", "request_to_speak",
-    "manage_events", "manage_threads", "create_public_threads", "create_private_threads",
-    "external_stickers", "send_messages_in_threads", "use_embedded_activities", "moderate_members"
-]
-
+class RobloxUsernameModal(discord.ui.Modal):
+    def __init__(self, view):
+        super().__init__(title="Enter Roblox Username")
+        self.view = view
+        
+        self.roblox_input = discord.ui.TextInput(
+            label="Roblox Username",
+            placeholder="Enter the exact Roblox username",
+            max_length=50,
+            required=True
+        )
+        self.add_item(self.roblox_input)
+    
+    async def on_submit(self, interaction):
+        roblox_username = self.roblox_input.value.strip()
+        
+        # Basic validation
+        if not roblox_username:
+            embed = discord.Embed(
+                title="❌ **Invalid Username**",
+                description="Please enter a valid Roblox username.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=self.view)
+            return
+        
+        # Check for invalid characters (basic validation)
+        if len(roblox_username) < 3 or len(roblox_username) > 20:
+            embed = discord.Embed(
+                title="❌ **Invalid Username**",
+                description="Roblox usernames must be between 3-20 characters.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=self.view)
+            return
+        
+        # Store the Roblox username
+        enlistment_sessions[interaction.user.id]['roblox_username'] = roblox_username
+        enlistment_sessions[interaction.user.id]['step'] = 'confirmation'
+        
+        # Show confirmation
+        await self.show_confirmation(interaction, roblox_username)
+    
+    async def show_confirmation(self, interaction, roblox_username):
+        regiment_info = REGIMENT_ROLES[self.view.regiment_name]
+        new_nickname = f"{regiment_info['prefix']} ({roblox_username})"
+        
+        embed = discord.Embed(
+            title="✅ **Confirm Enlistment**",
+            description=f"**Step 4/4:** Please confirm the enlistment details:",
+            color=discord.Color.orange()
+        )
+        
+        embed.add_field(name="👤 **Member**", value=self.view.member.mention, inline=True)
+        embed.add_field(name="🎖️ **Regiment**", value=f"{self.view.regiment_name.upper()}", inline=True)
+        embed.add_field(name="🎮 **Roblox Username**", value=roblox_username, inline=True)
+        embed.add_field(name="🏷️ **New Nickname**", value=new_nickname, inline=False)
+        
+        # Check for existing regiment roles
+        current_regiments = []
+        for role in self.view.member.roles:
+            for reg_name, reg_info in REGIMENT_ROLES.items():
+                if role.id == reg_info['role_id']:
+                    current_regiments.append(reg_name.upper())
+        
+        if current_regiments:
+            embed.add_field(
+                name="⚠️ **Note**",
+                value=f"This will remove existing regiment roles: {', '.join(current_regiments)}",
+                inline=False
+            )
+        
+        # Check nickname length
+        if len(new_nickname) > 32:
+            embed.add_field(
+                name="⚠️ **Warning**",
+                value=f"Nickname will be truncated to 32 characters: `{new_nickname[:32]}`",
+                inline=False
+            )
+        
+        embed.set_footer(text="Click 'Confirm' to proceed or 'Cancel' to abort.")
+        
+        view = ConfirmationView(interaction.user.id, self.view.member, self.view.regiment_name, roblox_username)
+        await interaction.response.edit_message(embed=embed, view=view)
+    def __init__(self, author_id, member, regiment_name, timeout=300):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.member = member
+        self.regiment_name = regiment_name
+        self.message = None
+    
+    @discord.ui.button(label="Confirm Enlistment", emoji="✅", style=discord.ButtonStyle.success)
+    async def confirm_button(self, interaction, button):
+        await self.process_enlistment(interaction)
+    
+    @discord.ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.danger)
+    async def cancel_button(self, interaction, button):
+        embed = discord.Embed(
+            title="❌ **Cancelled**",
+            description="Enlistment process cancelled.",
+            color=discord.Color.red()
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        # Clean up session
+        if interaction.user.id in enlistment_sessions:
+            del enlistment_sessions[interaction.user.id]
+    
+    async def process_enlistment(self, interaction):
+        try:
+            # Security checks
+            if not interaction.guild.me.guild_permissions.manage_roles:
+                embed = discord.Embed(
+                    title="❌ **Error**",
+                    description="Bot lacks permission to manage roles.",
+                    color=discord.Color.red()
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+            
+            if not interaction.guild.me.guild_permissions.manage_nicknames:
+                embed = discord.Embed(
+                    title="❌ **Error**",
+                    description="Bot lacks permission to manage nicknames.",
+                    color=discord.Color.red()
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+            
+            # Get regiment info
+            regiment_info = REGIMENT_ROLES[self.regiment_name]
+            regiment_role = interaction.guild.get_role(regiment_info['role_id'])
+            
+            if not regiment_role:
+                embed = discord.Embed(
+                    title="❌ **Error**",
+                    description="Regiment role not found. Please contact an administrator.",
+                    color=discord.Color.red()
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+            
+            # Check role hierarchy
+            if regiment_role >= interaction.guild.me.top_role:
+                embed = discord.Embed(
+                    title="❌ **Error**",
+                    description="Cannot assign role due to role hierarchy.",
+                    color=discord.Color.red()
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+            
+            # Show processing message
+            embed = discord.Embed(
+                title="⏳ **Processing Enlistment**",
+                description="Please wait while the enlistment is being processed...",
+                color=discord.Color.yellow()
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+            
+            # Remove existing regiment roles
+            roles_removed = []
+            for role in self.member.roles:
+                for reg_name, reg_info in REGIMENT_ROLES.items():
+                    if role.id == reg_info['role_id']:
+                        await self.member.remove_roles(role, reason=f"Regiment transfer by {interaction.user}")
+                        roles_removed.append(reg_name.upper())
+            
+            # Add new regiment role
+            await self.member.add_roles(regiment_role, reason=f"Enlisted by {interaction.user}")
+            
+            # Update nickname
+            new_prefix = regiment_info['prefix']
+            new_nickname = f"{new_prefix} ({self.roblox_username})"
+            
+            # Discord nickname length limit
+            if len(new_nickname) > 32:
+                new_nickname = new_nickname[:32]
+            
+            await self.member.edit(nick=new_nickname, reason=f"Enlisted to {self.regiment_name.upper()} by {interaction.user}")
+            
+            # Success message
+            embed = discord.Embed(
+                title="🎉 **Enlistment Successful!**",
+                description=f"{self.member.mention} has been successfully enlisted!",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            )
+            
+            embed.add_field(name="🎖️ **Regiment**", value=self.regiment_name.upper(), inline=True)
+            embed.add_field(name="📝 **Role Assigned**", value=regiment_role.mention, inline=True)
+            embed.add_field(name="🎮 **Roblox Username**", value=self.roblox_username, inline=True)
+            embed.add_field(name="🏷️ **New Nickname**", value=new_nickname, inline=True)
+            embed.add_field(name="👤 **Enlisted By**", value=interaction.user.mention, inline=True)
+            
+            if roles_removed:
+                embed.add_field(name="🔄 **Roles Removed**", value=", ".join(roles_removed), inline=False)
+            
+            embed.set_thumbnail(url=self.member.display_avatar.url)
+            embed.set_footer(text=f"Enlistment completed at")
+            
+            await interaction.edit_original_response(embed=embed)
+            
+            # Security logging
+            logger.info(f"SUCCESSFUL ENLISTMENT: {self.member} (ID: {self.member.id}) enlisted to {self.regiment_name.upper()} "
+                       f"by {interaction.user} (ID: {interaction.user.id}) in guild {interaction.guild.name}")
+            
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="❌ **Error**",
+                description="Insufficient permissions to modify this member.",
+                color=discord.Color.red()
+            )
+            await interaction.edit_original_response(embed=embed)
+            logger.error(f"Forbidden error when enlisting {self.member} by {interaction.user}")
+            
+        except discord.HTTPException as e:
+            embed = discord.Embed(
+                title="❌ **Error**",
+                description="Failed to complete enlistment due to Discord API error.",
+                color=discord.Color.red()
+            )
+            await interaction.edit_original_response(embed=embed)
+            logger.error(f"HTTP error when enlisting {self.member} by {interaction.user}: {e}")
+            
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ **Error**",
+                description="An unexpected error occurred during enlistment.",
+                color=discord.Color.red()
+            )
+            await interaction.edit_original_response(embed=embed)
+            logger.error(f"Unexpected error when enlisting {self.member} by {interaction.user}: {e}")
+        
+        finally:
+            # Clean up session
+            if interaction.user.id in enlistment_sessions:
+                del enlistment_sessions[interaction.user.id]
+    
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Only the command user can interact with this.", ephemeral=True)
+            return False
+        return True
+    
+    async def on_timeout(self):
+        if self.message:
+            embed = discord.Embed(
+                title="⏰ **Session Timeout**",
+                description="The enlistment session has timed out.",
+                color=discord.Color.red()
+            )
+            await self.message.edit(embed=embed, view=None)
+        
+        # Clean up session data
+        if self.author_id in enlistment_sessions:
+            del enlistment_sessions[self.author_id]
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
-    print(f'Bot ID: {bot.user.id}')
-    print('------')
+    logger.info(f'{bot.user} has connected to Discord!')
+    logger.info(f'Bot is in {len(bot.guilds)} guilds')
+    
+    # Security: Log all guilds the bot is in
+    for guild in bot.guilds:
+        logger.info(f'Guild: {guild.name} (ID: {guild.id})')
 
+@bot.command(name='enlist')
+@is_authorized()
+async def enlist_member(ctx):
+    """
+    Start the interactive enlistment process
+    """
+    
+    # Security: Additional validation
+    if not ctx.guild:
+        logger.warning(f"Command attempted outside of guild by {ctx.author}")
+        await ctx.send("❌ This command can only be used in a server.")
+        return
+    
+    # Check if user already has an active session
+    if ctx.author.id in enlistment_sessions:
+        await ctx.send("❌ You already have an active enlistment session. Please complete or cancel it first.")
+        return
+    
+    # Start the enlistment process
+    embed = discord.Embed(
+        title="🎖️ **Regiment Enlistment System**",
+        description="**Step 1/4:** Select the member you want to enlist.\n\n"
+                   "Click the button below to specify the member.",
+        color=discord.Color.blue()
+    )
+    
+    embed.add_field(
+        name="📋 **Process Overview**",
+        value="1️⃣ Select Member\n2️⃣ Choose Regiment\n3️⃣ Enter Roblox Username\n4️⃣ Confirm Details",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="📋 **Available Regiments**",
+        value="\n".join([f"{info['emoji']} **{name.upper()}** - {info['prefix']}" 
+                        for name, info in REGIMENT_ROLES.items()]),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🏷️ **Nickname Format**",
+        value="`{REGIMENT} (RobloxUsername)`\nExample: `{3RD} (PlayerName123)`",
+        inline=False
+    )
+    
+    embed.set_footer(text="This session will timeout after 5 minutes.")
+    
+    view = MemberSelectView(ctx.author.id)
+    message = await ctx.send(embed=embed, view=view)
+    view.message = message
+    
+    # Initialize session
+    enlistment_sessions[ctx.author.id] = {
+        'step': 'member_selection',
+        'message': message
+    }
 
-# Add the cog to the bot
-bot.add_cog(MilitaryPointsSystem(bot))
+@MemberSelectView.select(placeholder="Choose a member to enlist...")
+class MemberSelect(discord.ui.Select):
+    def __init__(self, view):
+        # This is a placeholder - we'll use a modal instead
+        super().__init__(placeholder="Select Member")
+        self.view = view
+
+# Add a button to the MemberSelectView to open the modal
+@discord.ui.button(label="Select Member", emoji="👤", style=discord.ButtonStyle.primary)
+async def select_member_button(self, interaction, button):
+    modal = MemberSelectModal(self)
+    await interaction.response.send_modal(modal)
+
+# Add the button to the MemberSelectView
+MemberSelectView.select_member_button = select_member_button
+
+@bot.command(name='regiments')
+@is_authorized()
+async def list_regiments(ctx):
+    """Display all available regiments with their information"""
+    
+    embed = discord.Embed(
+        title="📋 **Available Regiments**",
+        description="Here are all the available regiments for enlistment:",
+        color=discord.Color.blue()
+    )
+    
+    for reg_name, reg_info in REGIMENT_ROLES.items():
+        role = ctx.guild.get_role(reg_info['role_id'])
+        role_mention = role.mention if role else "⚠️ Role not found"
+        
+        embed.add_field(
+            name=f"{reg_info['emoji']} **{reg_name.upper()}**",
+            value=f"**Prefix:** {reg_info['prefix']}\n**Role:** {role_mention}",
+            inline=True
+        )
+    
+    embed.set_footer(text="Use !enlist to start the enlistment process")
+    await ctx.send(embed=embed)
+
+@bot.command(name='status')
+@is_authorized()
+async def enlistment_status(ctx):
+    """Check active enlistment sessions"""
+    
+    active_sessions = len(enlistment_sessions)
+    
+    embed = discord.Embed(
+        title="📊 **Enlistment System Status**",
+        color=discord.Color.green()
+    )
+    
+    embed.add_field(name="🔄 **Active Sessions**", value=str(active_sessions), inline=True)
+    embed.add_field(name="🎖️ **Available Regiments**", value=str(len(REGIMENT_ROLES)), inline=True)
+    embed.add_field(name="🤖 **Bot Status**", value="✅ Online", inline=True)
+    
+    if active_sessions > 0:
+        session_info = []
+        for user_id, session in enlistment_sessions.items():
+            user = ctx.guild.get_member(user_id)
+            user_name = user.display_name if user else f"Unknown User ({user_id})"
+            session_info.append(f"• {user_name} - {session['step']}")
+        
+        embed.add_field(
+            name="🔄 **Active Sessions Details**",
+            value="\n".join(session_info[:10]),  # Limit to 10 entries
+            inline=False
+        )
+    
+    await ctx.send(embed=embed)
+
+@bot.command(name='cancel')
+@is_authorized()
+async def cancel_enlistment(ctx):
+    """Cancel your active enlistment session"""
+    
+    if ctx.author.id not in enlistment_sessions:
+        await ctx.send("❌ You don't have an active enlistment session.")
+        return
+    
+    # Clean up session
+    del enlistment_sessions[ctx.author.id]
+    
+    embed = discord.Embed(
+        title="❌ **Session Cancelled**",
+        description="Your enlistment session has been cancelled.",
+        color=discord.Color.red()
+    )
+    
+    await ctx.send(embed=embed)
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Enhanced error handling with security logging"""
+    if isinstance(error, commands.CheckFailure):
+        # Already handled in the check function
+        return
+    elif isinstance(error, commands.MemberNotFound):
+        await ctx.send("❌ **Error**: Member not found. Please use the interactive enlistment system.")
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send("❌ **Error**: Invalid argument provided.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("❌ **Error**: Use `!enlist` to start the interactive enlistment process.")
+    else:
+        logger.error(f"Unexpected error in command {ctx.command}: {error}")
+        await ctx.send("❌ **Error**: An unexpected error occurred. Please contact an administrator.")
+
+# Additional security: Monitor for suspicious activity
+@bot.event
+async def on_member_update(before, after):
+    """Monitor member updates for security purposes"""
+    if before.roles != after.roles:
+        added_roles = set(after.roles) - set(before.roles)
+        removed_roles = set(before.roles) - set(after.roles)
+        
+        for role in added_roles:
+            if role.id in [info['role_id'] for info in REGIMENT_ROLES.values()]:
+                logger.info(f"Regiment role {role.name} added to {after} (ID: {after.id})")
+        
+        for role in removed_roles:
+            if role.id in [info['role_id'] for info in REGIMENT_ROLES.values()]:
+                logger.info(f"Regiment role {role.name} removed from {after} (ID: {after.id})")
 
 # Run the bot
 if __name__ == "__main__":
-    token = os.getenv('DISCORD_TOKEN')
-    if not token:
-print("❌ Error: DISCORD_TOKEN not found in environment variables!")
-        print("Please create a .env file with your Discord bot token:")
-        print("DISCORD_TOKEN=your_bot_token_here")
+    discord_token = os.getenv('DISCORD_TOKEN')
+    
+    if not discord_token:
+        logger.error("DISCORD_TOKEN environment variable not found!")
+        print("Error: Please set the DISCORD_TOKEN environment variable.")
         exit(1)
     
     try:
-        bot.run(token)
+        bot.run(discord_token)
     except discord.LoginFailure:
-        print("❌ Error: Invalid Discord token!")
+        logger.error("Invalid Discord token provided!")
+        print("Error: Invalid Discord token. Please check your DISCORD_TOKEN environment variable.")
     except Exception as e:
-        print(f"❌ Error starting bot: {str(e)}")
+        logger.error(f"Fatal error starting bot: {e}")
+        print(f"Fatal error: {e}")
+       
