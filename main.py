@@ -945,7 +945,7 @@ class MilitaryPointsSystem(commands.Cog):
         # Ensure score is within 1-5 range
         return max(1, min(5, score))
     
-    @commands.slash_command(name="award_points", description="Award points to a user for military event participation")
+    @bot.slash_command(name="award_points", description="Award points to a user for military event participation")
     async def award_points(self, ctx, user: discord.Member, points: int = None, *, description: str):
         """Award points to a user"""
         if not self.is_host(ctx.author):
@@ -979,7 +979,7 @@ class MilitaryPointsSystem(commands.Cog):
         
         await ctx.respond(embed=embed)
     
-    @commands.slash_command(name="my_points", description="Check your military points")
+    @bot.slash_command(name="my_points", description="Check your military points")
     async def my_points(self, ctx):
         """Check user's own points"""
         user_data = self.get_user_data(ctx.author.id)
@@ -1010,7 +1010,7 @@ class MilitaryPointsSystem(commands.Cog):
         
         await ctx.respond(embed=embed)
     
-    @commands.slash_command(name="check_points", description="Check another user's military points")
+    @bot.slash_command(name="check_points", description="Check another user's military points")
     async def check_points(self, ctx, user: discord.Member):
         """Check another user's points"""
         user_data = self.get_user_data(user.id)
@@ -1041,7 +1041,7 @@ class MilitaryPointsSystem(commands.Cog):
         
         await ctx.respond(embed=embed)
     
-    @commands.slash_command(name="leaderboard", description="View the military points leaderboard")
+    @bot.slash_command(name="leaderboard", description="View the military points leaderboard")
     async def leaderboard(self, ctx, period: str = "total"):
         """Show leaderboard for total or monthly points"""
         if period not in ["total", "monthly"]:
@@ -1092,7 +1092,7 @@ class MilitaryPointsSystem(commands.Cog):
         
         await ctx.respond(embed=embed)
     
-    @commands.slash_command(name="promote", description="Promote a user to their next rank")
+    @bot.slash_command(name="promote", description="Promote a user to their next rank")
     async def promote(self, ctx, user: discord.Member):
         """Promote a user to next rank"""
         if not self.is_host(ctx.author) and user != ctx.author:
@@ -1159,7 +1159,7 @@ class MilitaryPointsSystem(commands.Cog):
             )
             await ctx.respond(embed=embed, ephemeral=True)
     
-    @commands.slash_command(name="pass_exam", description="Mark a user as having passed the sergeant exam")
+    @bot.slash_command(name="pass_exam", description="Mark a user as having passed the sergeant exam")
     async def pass_exam(self, ctx, user: discord.Member):
         """Mark user as having passed sergeant exam"""
         if not self.is_host(ctx.author):
@@ -1191,7 +1191,7 @@ class MilitaryPointsSystem(commands.Cog):
             )
             await ctx.respond(embed=embed, ephemeral=True)
     
-    @commands.slash_command(name="point_history", description="View your recent point history")
+    @bot.slash_command(name="point_history", description="View your recent point history")
     async def point_history(self, ctx, user: discord.Member = None):
         """View point history for self or another user"""
         target_user = user or ctx.author
