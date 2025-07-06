@@ -615,7 +615,7 @@ async def cheesecake(ctx, action=None, *, args=None):
                         setattr(permissions, perm, True)
                         valid_perms.append(perm)
                     else:
-  bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # Your Discord user ID
 OWNER_ID = 728201873366056992
