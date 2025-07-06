@@ -687,7 +687,7 @@ async def enlist_member(ctx):
 
 class MemberSelectView(discord.ui.View):
     def __init__(self):
-    super().__init__()
+    super() .__init__()
 
 
 @discord.ui.select(placeholder="Choose a member to enlist...")
