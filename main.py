@@ -291,7 +291,7 @@ class RobloxUsernameView(discord.ui.View):
             del enlistment_sessions[self.author_id]
             
     class RobloxUsernameModal(discord.ui.Modal):
-    def __init__(self, view):
+        def __init__(self, view):
         super().__init__(title="Enter Roblox Username")
         self.view = view
         self.roblox_input = discord.ui.TextInput(
