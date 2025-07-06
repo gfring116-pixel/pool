@@ -289,7 +289,8 @@ class RobloxUsernameView(discord.ui.View):
             await self.message.edit(embed=embed, view=None)
         if self.author_id in enlistment_sessions:
             del enlistment_sessions[self.author_id]
-            class RobloxUsernameModal(discord.ui.Modal):
+            
+    class RobloxUsernameModal(discord.ui.Modal):
     def __init__(self, view):
         super().__init__(title="Enter Roblox Username")
         self.view = view
