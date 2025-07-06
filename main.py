@@ -441,7 +441,7 @@ class MilitaryPointsSystem(commands.Cog):
 
 # Run the bot
 if __name__ == "__main__":
-    token = os.getenv('DISCORD_BOT_TOKEN')
+    token = os.getenv('DISCORD_TOKEN')
     if not token:
         print("Error: DISCORD_BOT_TOKEN not found in environment variables!")
         print("Please create a .env file with your bot token.")
