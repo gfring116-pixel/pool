@@ -686,7 +686,7 @@ async def enlist_member(ctx):
     }
 
 class MemberSelectView(discord.ui.View):
-    def__init__(self):
+    def __init__(self):
     super().__init__()
 
 
