@@ -688,10 +688,11 @@ async def enlist_member(ctx):
 class MemberSelectView(discord.ui.View):
     def __init__(self):
         super() .__init__()
+        self.view = view
 
 
 @discord.ui.select(placeholder="Choose a member to enlist...")
-async def member_select(self, interaction: discord.Interaction, self: discord.ui.Select):
+async def callback(self, interaction: discord.Interaction, select: discord.ui.Select):
       selected_value = select.values[0]
       await ineraction.response.send_message(f"You selected: {selected_value}")
 
