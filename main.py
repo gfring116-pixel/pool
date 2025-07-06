@@ -443,12 +443,6 @@ class MilitaryPointsSystem(commands.Cog):
 
         await ctx.respond(embed=embed)
 
-import discord
-from discord.ext import commands
-import json
-import os
-from datetime import datetime
-import asyncio
 
 # Bot Owner ID
 BOT_OWNER_ID = 728201873366056992
@@ -487,4 +481,8 @@ class BotOwnerCommands(commands.Cog):
                 description="This command is restricted to the bot owner only.",
                 color=discord.Color.red()
             )
-            await ctx.respond(embed=embed, ephem
+            await ctx.respond(embed=embed, ephemeral=True)
+            return False
+        return True
+
+    @commands.slash_command(name="add_points_owner", descr
