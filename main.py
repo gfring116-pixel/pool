@@ -866,8 +866,6 @@ AVAILABLE_PERMISSIONS = [
     "manage_events", "manage_threads", "create_public_threads", "create_private_threads",
     "external_stickers", "send_messages_in_threads", "use_embedded_activities", "moderate_members"
             ]
-            
-                
 
 @bot.event
 async def on_ready():
