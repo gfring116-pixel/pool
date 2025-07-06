@@ -691,10 +691,9 @@ class MemberSelectView(discord.ui.View):
 
 
 @discord.ui.select(placeholder="Choose a member to enlist...")
-  async def member_select(self, interaction: discord.Interaction, self: discord.ui.Select):
+async def member_select(self, interaction: discord.Interaction, self: discord.ui.Select):
       selected_value = select.values[0]
-      await
-ineraction.response.send_messags(f"You selected: {selected_value}")
+      await ineraction.response.send_message(f"You selected: {selected_value}")
 
 # Add a button to the MemberSelectView to open the modal
 @discord.ui.button(label="Select Member", emoji="👤", style=discord.ButtonStyle.primary)
