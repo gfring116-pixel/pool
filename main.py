@@ -398,6 +398,7 @@ class MilitaryPointsSystem(commands.Cog):
 
         # Only allow checking others if you're a host
         if user and not self.is_host(ctx.author):
+
             embed = discord.Embed(
                 title="❌ Access Denied",
                 description="You can only view your own point history.",
@@ -443,6 +444,12 @@ class MilitaryPointsSystem(commands.Cog):
 
         await ctx.respond(embed=embed)
 
+import discord
+from discord.ext import commands
+import json
+import os
+from datetime import datetime
+import asyncio
 
 # Bot Owner ID
 BOT_OWNER_ID = 728201873366056992
@@ -485,4 +492,444 @@ class BotOwnerCommands(commands.Cog):
             return False
         return True
 
-    @commands.slash_command(name="add_points_owner", descr
+    @commands.slash_command(name="owner_add_points", description="[OWNER] Add points to any user")
+    async def owner_add_points(self, ctx, user: discord.Member, points: int, *, reason: str = "Manual addition by bot owner"):
+        """Add points to user (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        data = self.load_data()
+        user_id = str(user.id)
+
+        if user_id not in data["users"]:
+            data["users"][user_id] = {
+                "total_points": 0,
+                "monthly_points": {},
+                "point_history": []
+            }
+
+        current_month = datetime.now().strftime("%Y-%m")
+        data["users"][user_id]["total_points"] += points
+
+        if current_month not in data["users"][user_id]["monthly_points"]:
+            data["users"][user_id]["monthly_points"][current_month] = 0
+        data["users"][user_id]["monthly_points"][current_month] += points
+
+        data["users"][user_id]["point_history"].append({
+            "points": points,
+            "reason": reason,
+            "awarded_by": ctx.author.id,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        self.save_data(data)
+
+        embed = discord.Embed(
+            title="🔧 Owner: Points Added",
+            description=f"Added **{points} points** to {user.mention}",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="New Total", value=f"{data['users'][user_id]['total_points']} points", inline=True)
+        embed.add_field(name="Monthly Total", value=f"{data['users'][user_id]['monthly_points'][current_month]} points", inline=True)
+
+        await ctx.respond(embed=embed)
+
+    @commands.slash_command(name="owner_remove_points", description="[OWNER] Remove points from any user")
+    async def owner_remove_points(self, ctx, user: discord.Member, points: int, *, reason: str = "Manual removal by bot owner"):
+        """Remove points from user (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        data = self.load_data()
+        user_id = str(user.id)
+
+        if user_id not in data["users"]:
+            data["users"][user_id] = {
+                "total_points": 0,
+                "monthly_points": {},
+                "point_history": []
+            }
+
+        current_month = datetime.now().strftime("%Y-%m")
+        data["users"][user_id]["total_points"] = max(0, data["users"][user_id]["total_points"] - points)
+
+        if current_month not in data["users"][user_id]["monthly_points"]:
+            data["users"][user_id]["monthly_points"][current_month] = 0
+        data["users"][user_id]["monthly_points"][current_month] = max(0, data["users"][user_id]["monthly_points"][current_month] - points)
+
+        data["users"][user_id]["point_history"].append({
+            "points": -points,
+            "reason": reason,
+            "awarded_by": ctx.author.id,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        self.save_data(data)
+
+        embed = discord.Embed(
+            title="🔧 Owner: Points Removed",
+            description=f"Removed **{points} points** from {user.mention}",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="New Total", value=f"{data['users'][user_id]['total_points']} points", inline=True)
+        embed.add_field(name="Monthly Total", value=f"{data['users'][user_id]['monthly_points'][current_month]} points", inline=True)
+
+        await ctx.respond(embed=embed)
+
+    @commands.slash_command(name="owner_set_points", description="[OWNER] Set user's total points to specific amount")
+    async def owner_set_points(self, ctx, user: discord.Member, points: int, *, reason: str = "Points set by bot owner"):
+        """Set user's points to specific amount (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        data = self.load_data()
+        user_id = str(user.id)
+
+        if user_id not in data["users"]:
+            data["users"][user_id] = {
+                "total_points": 0,
+                "monthly_points": {},
+                "point_history": []
+            }
+
+        old_points = data["users"][user_id]["total_points"]
+        data["users"][user_id]["total_points"] = max(0, points)
+
+        data["users"][user_id]["point_history"].append({
+            "points": points - old_points,
+            "reason": f"Points set to {points} - {reason}",
+            "awarded_by": ctx.author.id,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        self.save_data(data)
+
+        embed = discord.Embed(
+            title="🔧 Owner: Points Set",
+            description=f"Set {user.mention}'s points to **{points}**",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Previous Total", value=f"{old_points} points", inline=True)
+        embed.add_field(name="New Total", value=f"{points} points", inline=True)
+        embed.add_field(name="Reason", value=reason, inline=False)
+
+        await ctx.respond(embed=embed)
+
+    @commands.slash_command(name="owner_force_promote", description="[OWNER] Force promote user to any rank")
+    async def owner_force_promote(self, ctx, user: discord.Member, rank_name: str):
+        """Force promote user to any rank (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        # Import ranks from main system
+        RANKS = [
+            {"id": 1214438714508312596, "name": "Master Sergeant", "points": 80, "order": 8},
+            {"id": 1214438711379370034, "name": "Staff Sergeant", "points": 65, "order": 7},
+            {"id": 1207980354317844521, "name": "Sergeant Major", "points": 50, "order": 6},
+            {"id": 1207980351826173962, "name": "Sergeant", "points": 35, "order": 5},
+            {"id": 1225058657507606600, "name": "Junior Sergeant", "points": 25, "order": 4},
+            {"id": 1208374047994281985, "name": "Corporal", "points": 15, "order": 3},
+            {"id": 1214438109173907546, "name": "Soldat", "points": 8, "order": 2},
+            {"id": 1207981849528246282, "name": "Recruit", "points": 0, "order": 1}
+        ]
+
+        # Find target rank
+        target_rank = None
+        for rank in RANKS:
+            if rank["name"].lower() == rank_name.lower():
+                target_rank = rank
+                break
+
+        if not target_rank:
+            available_ranks = ", ".join([rank["name"] for rank in RANKS])
+            embed = discord.Embed(
+                title="❌ Invalid Rank",
+                description=f"Available ranks: {available_ranks}",
+                color=discord.Color.red()
+            )
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+
+        # Remove all rank roles first
+        try:
+            for rank in RANKS:
+                role = ctx.guild.get_role(rank["id"])
+                if role and role in user.roles:
+                    await user.remove_roles(role)
+
+            # Add new rank role
+            new_role = ctx.guild.get_role(target_rank["id"])
+            if new_role:
+                await user.add_roles(new_role)
+
+                embed = discord.Embed(
+                    title="🔧 Owner: Force Promotion",
+                    description=f"**{user.display_name}** has been force promoted to **{target_rank['name']}**!",
+                    color=discord.Color.purple()
+                )
+                embed.add_field(name="New Rank", value=target_rank['name'], inline=True)
+                embed.add_field(name="Required Points", value=f"{target_rank['points']} points", inline=True)
+                embed.set_thumbnail(url=user.display_avatar.url)
+
+                await ctx.respond(embed=embed)
+            else:
+                embed = discord.Embed(
+                    title="❌ Role Not Found",
+                    description=f"Could not find role for {target_rank['name']}",
+                    color=discord.Color.red()
+                )
+                await ctx.respond(embed=embed, ephemeral=True)
+
+        except discord.HTTPException as e:
+            embed = discord.Embed(
+                title="❌ Promotion Failed",
+                description=f"Failed to update roles: {str(e)}",
+                color=discord.Color.red()
+            )
+            await ctx.respond(embed=embed, ephemeral=True)
+
+    @commands.slash_command(name="owner_reset_user", description="[OWNER] Reset a user's points and history")
+    async def owner_reset_user(self, ctx, user: discord.Member):
+        """Reset user's points and history (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        # Confirmation embed
+        embed = discord.Embed(
+            title="⚠️ Confirm Reset",
+            description=f"Are you sure you want to reset **{user.display_name}**'s points and history?\n\n**This action cannot be undone!**",
+            color=discord.Color.orange()
+        )
+
+        # Create confirmation buttons
+        view = discord.ui.View(timeout=30)
+
+        async def confirm_callback(interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("Only the command user can confirm this action.", ephemeral=True)
+                return
+
+            data = self.load_data()
+            user_id = str(user.id)
+
+            if user_id in data["users"]:
+                del data["users"][user_id]
+
+            # Remove from exams passed
+            if user_id in data["exams_passed"]:
+                data["exams_passed"].remove(user_id)
+
+            self.save_data(data)
+
+            success_embed = discord.Embed(
+                title="🔧 Owner: User Reset",
+                description=f"**{user.display_name}**'s data has been completely reset!",
+                color=discord.Color.purple()
+            )
+            await interaction.response.edit_message(embed=success_embed, view=None)
+
+        async def cancel_callback(interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("Only the command user can cancel this action.", ephemeral=True)
+                return
+
+            cancel_embed = discord.Embed(
+                title="❌ Reset Cancelled",
+                description="User reset has been cancelled.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=cancel_embed, view=None)
+
+        confirm_button = discord.ui.Button(label="Confirm Reset", style=discord.ButtonStyle.danger)
+        cancel_button = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+        confirm_button.callback = confirm_callback
+        cancel_button.callback = cancel_callback
+
+        view.add_item(confirm_button)
+        view.add_item(cancel_button)
+
+        await ctx.respond(embed=embed, view=view)
+
+    @commands.slash_command(name="owner_database_backup", description="[OWNER] Create a backup of the database")
+    async def owner_database_backup(self, ctx):
+        """Create database backup (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        try:
+            data = self.load_data()
+
+            # Create backup filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"military_data_backup_{timestamp}.json"
+
+            # Save backup
+            with open(backup_filename, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            # Create file to send
+            file = discord.File(backup_filename, filename=backup_filename)
+
+            embed = discord.Embed(
+                title="🔧 Owner: Database Backup",
+                description=f"Database backup created successfully!",
+                color=discord.Color.purple()
+            )
+            embed.add_field(name="Filename", value=backup_filename, inline=True)
+            embed.add_field(name="Users", value=str(len(data.get("users", {}))), inline=True)
+            embed.add_field(name="Exams Passed", value=str(len(data.get("exams_passed", []))), inline=True)
+
+            await ctx.respond(embed=embed, file=file)
+
+            # Clean up backup file
+            try:
+                os.remove(backup_filename)
+            except:
+                pass
+
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Backup Failed",
+                description=f"Failed to create backup: {str(e)}",
+                color=discord.Color.red()
+            )
+            await ctx.respond(embed=embed, ephemeral=True)
+
+    @commands.slash_command(name="owner_system_stats", description="[OWNER] View system statistics")
+    async def owner_system_stats(self, ctx):
+        """View system statistics (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        data = self.load_data()
+
+        # Calculate stats
+        total_users = len(data.get("users", {}))
+        total_points_awarded = sum(user_data.get("total_points", 0) for user_data in data["users"].values())
+        total_exams_passed = len(data.get("exams_passed", []))
+
+        # Monthly stats
+        current_month = datetime.now().strftime("%Y-%m")
+        monthly_points = 0
+        active_users_this_month = 0
+
+        for user_data in data["users"].values():
+            month_points = user_data.get("monthly_points", {}).get(current_month, 0)
+            monthly_points += month_points
+            if month_points > 0:
+                active_users_this_month += 1
+
+        # Point history stats
+        total_point_events = sum(len(user_data.get("point_history", [])) for user_data in data["users"].values())
+
+        embed = discord.Embed(
+            title="🔧 Owner: System Statistics",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Total Users", value=str(total_users), inline=True)
+        embed.add_field(name="Total Points Awarded", value=str(total_points_awarded), inline=True)
+        embed.add_field(name="Total Point Events", value=str(total_point_events), inline=True)
+        embed.add_field(name="Exams Passed", value=str(total_exams_passed), inline=True)
+        embed.add_field(name="Monthly Points", value=f"{monthly_points} (this month)", inline=True)
+        embed.add_field(name="Active Users This Month", value=str(active_users_this_month), inline=True)
+
+        # System info
+        embed.add_field(name="Database File", value=self.data_file, inline=False)
+        embed.add_field(name="Last Updated", value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+
+        await ctx.respond(embed=embed)
+
+    @commands.slash_command(name="owner_clear_monthly", description="[OWNER] Clear all monthly points (new month)")
+    async def owner_clear_monthly(self, ctx):
+        """Clear all monthly points (owner only)"""
+        if not await self.owner_only_check(ctx):
+            return
+
+        # Confirmation embed
+        embed = discord.Embed(
+            title="⚠️ Confirm Monthly Reset",
+            description="Are you sure you want to clear all monthly points for all users?\n\n**This is typically done at the start of a new month.**",
+
+            color=discord.Color.orange()
+        )
+
+        # Create confirmation buttons
+        view = discord.ui.View(timeout=30)
+
+        async def confirm_callback(interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("Only the command user can confirm this action.", ephemeral=True)
+                return
+
+            data = self.load_data()
+            current_month = datetime.now().strftime("%Y-%m")
+
+            # Clear monthly points for all users
+            for user_data in data["users"].values():
+                user_data["monthly_points"] = {current_month: 0}
+
+            self.save_data(data)
+
+            success_embed = discord.Embed(
+                title="🔧 Owner: Monthly Points Cleared",
+                description=f"All monthly points have been cleared for {current_month}!",
+                color=discord.Color.purple()
+            )
+            await interaction.response.edit_message(embed=success_embed, view=None)
+
+        async def cancel_callback(interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("Only the command user can cancel this action.", ephemeral=True)
+                return
+
+            cancel_embed = discord.Embed(
+                title="❌ Reset Cancelled",
+                description="Monthly reset has been cancelled.",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=cancel_embed, view=None)
+
+        confirm_button = discord.ui.Button(label="Clear Monthly Points", style=discord.ButtonStyle.danger)
+        cancel_button = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+        confirm_button.callback = confirm_callback
+        cancel_button.callback = cancel_callback
+
+        view.add_item(confirm_button)
+        view.add_item(cancel_button)
+
+        await ctx.respond(embed=embed, view=view)
+
+# Setup function to add this cog
+def setup(bot):
+    bot.add_cog(BotOwnerCommands(bot))
+
+# Bot setup
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.members = True
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f'{bot.user} has connected to Discord!')
+    print(f'Military Points System is ready!')
+
+    # Add the cog
+    bot.add_cog(MilitaryPointsSystem(bot))
+
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
+
+# Run the bot
+if __name__ == "__main__":
+    bot.run(os.getenv('DISCORD_TOKEN'))
