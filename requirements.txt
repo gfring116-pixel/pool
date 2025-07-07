@@ -3,3 +3,4 @@ python-dotenv
 PyNaCl>=1.5.0
 gspread
 google-auth
+oauth2client
