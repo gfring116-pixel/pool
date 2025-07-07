@@ -824,7 +824,7 @@ async def delrole(ctx, *, role_name):
         await ctx.send(f"something broke: {str(e)}")
             
             # Clean up session - confirmation view will handle it
-            del active_sessions[message.author.id]
+    del active_sessions[message.author.id]
     
     # Process commands
     await bot.process_commands(message)
