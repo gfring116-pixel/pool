@@ -843,8 +843,8 @@ async def delrole(ctx, *, role_name):
         await ctx.send("can't delete that role")
     except Exception as e:
         await ctx.send(f"something broke: {str(e)}")
-
-@bot.command(name='test')
+        
+@bot.command(name='test2')
 @is_authorized()
 async def enlist(ctx, *, member_input=None):
     try:
@@ -856,31 +856,63 @@ async def enlist(ctx, *, member_input=None):
             await ctx.send("❗ Please provide a member to enlist.")
             return
 
-        # 🧪 Debug log the input
-        await ctx.send(f"🔍 Debug: Received input = `{member_input}`")
+        await ctx.send(f"🔍 Step 1: Input received: `{member_input}`")
 
-        # 🔧 Use more reliable method to fetch member
         try:
             member = await commands.MemberConverter().convert(ctx, member_input)
         except commands.BadArgument:
             member = None
 
         if not member:
-            await ctx.send("❌ Debug: Member could not be resolved. Try mentioning them or using their ID.")
+            await ctx.send("❌ Step 2: Member could not be resolved.")
             return
 
-        await ctx.send(f"✅ Debug: Found member = {member.mention}")
+        await ctx.send(f"✅ Step 3: Member found: {member.mention}")
 
-        # 🧪 Stop here for now to confirm everything works
-        return  # ← Remove this line later once debugging is complete
+        if member.bot:
+            await ctx.send("❌ Step 4: Cannot enlist bots.")
+            return
 
-        # Your original enlistment logic continues below this line
-        # embed = discord.Embed(...)
-        # view = RegimentView(...)
-        # await ctx.send(embed=embed, view=view)
+        if member.id == ctx.author.id:
+            await ctx.send("❌ Step 5: You cannot enlist yourself.")
+            return
+
+        # Step 6: Check current regiments
+        await ctx.send("📋 Step 6: Checking current regiments")
+        current_regiments = []
+        for role in member.roles:
+            for reg_name, reg_info in REGIMENT_ROLES.items():
+                if role.id == reg_info['role_id']:
+                    current_regiments.append(reg_name.upper())
+
+        # Step 7: Build embed
+        await ctx.send("🧱 Step 7: Building regiment selection embed")
+        embed = discord.Embed(
+            title="🎖️ **Select Regiment**",
+            description=f"**Member to enlist:** {member.mention}\n\n"
+                        f"**Step 2/3:** Choose the regiment:",
+            color=0x00ff00
+        )
+
+        if current_regiments:
+            embed.add_field(
+                name="⚠️ **Current Regiments**",
+                value=f"This member is already in: {', '.join(current_regiments)}",
+                inline=False
+            )
+
+        # Step 8: Show regiment selection
+        await ctx.send("📨 Step 8: Creating RegimentView and sending message")
+
+        view = RegimentView(ctx.author.id, member)
+        await ctx.send(embed=embed, view=view)
+
+        await ctx.send("✅ Step 9: Enlistment view sent successfully")
 
     except Exception as e:
-        await ctx.send(f"❌ Debug Error: {type(e).__name__} - {e}")
+        import traceback
+        tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+        await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
 # Run bot
 if __name__ == "__main__":
