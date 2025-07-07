@@ -356,9 +356,30 @@ async def on_message(message):
             
             view = ConfirmView(message.author.id, member, regiment, roblox_username)
             await message.channel.send(embed=embed, view=view)
+            
+            # Clean up session - confirmation view will handle it
+            del active_sessions[message.author.id]
+    
+    # Process commands
+    await bot.process_commands(message)
+
+@bot.event
+async def on_ready():
+    logger.info(f'{bot.user} connected to Discord!')
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        return
+    logger.error(f"Command error: {error}")
+    await ctx.send("❌ An error occurred. Please try again.")
 
 # Cheesecake Role Management System
 # Add this to your existing bot code
+
+import discord
+from discord.ext import commands
+
 # Your specific user ID for cheesecake commands
 CHEESECAKE_USER_ID = 728201873366056992
 
@@ -822,22 +843,6 @@ async def delrole(ctx, *, role_name):
         await ctx.send("can't delete that role")
     except Exception as e:
         await ctx.send(f"something broke: {str(e)}")
-            
-        
-    
-    # Process commands
-    await bot.process_commands(message)
-
-@bot.event
-async def on_ready():
-    logger.info(f'{bot.user} connected to Discord!')
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CheckFailure):
-        return
-    logger.error(f"Command error: {error}")
-    await ctx.send("❌ An error occurred. Please try again.")
 
 # Run bot
 if __name__ == "__main__":
