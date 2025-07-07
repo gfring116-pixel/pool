@@ -913,7 +913,21 @@ async def enlist(ctx, *, member_input=None):
         import traceback
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
+        
+import os
+import json
 
+print("🚀 Starting test...")
+
+credentials_str = os.getenv("GOOGLE_CREDENTIALS")
+if not credentials_str:
+    raise ValueError("Missing GOOGLE_CREDENTIALS_JSON")
+
+try:
+    creds = json.loads(credentials_str)
+    print("✅ Credentials loaded successfully.")
+except Exception as e:
+    print("❌ JSON error:", e)
 
 # Run bot
 if __name__ == "__main__":
