@@ -922,7 +922,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 print("🚀 Starting Google Sheets Debug...")
 
 # Load and parse credentials
-credentials_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+credentials_str = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_str:
     raise ValueError("❌ Missing GOOGLE_CREDENTIALS_JSON")
 
