@@ -844,6 +844,44 @@ async def delrole(ctx, *, role_name):
     except Exception as e:
         await ctx.send(f"something broke: {str(e)}")
 
+@bot.command(name='test')
+@is_authorized()
+async def enlist(ctx, *, member_input=None):
+    try:
+        if ctx.author.id in active_sessions:
+            await ctx.send("❌ You already have an active enlistment session. Type `!cancel` to cancel it first.")
+            return
+
+        if not member_input:
+            await ctx.send("❗ Please provide a member to enlist.")
+            return
+
+        # 🧪 Debug log the input
+        await ctx.send(f"🔍 Debug: Received input = `{member_input}`")
+
+        # 🔧 Use more reliable method to fetch member
+        try:
+            member = await commands.MemberConverter().convert(ctx, member_input)
+        except commands.BadArgument:
+            member = None
+
+        if not member:
+            await ctx.send("❌ Debug: Member could not be resolved. Try mentioning them or using their ID.")
+            return
+
+        await ctx.send(f"✅ Debug: Found member = {member.mention}")
+
+        # 🧪 Stop here for now to confirm everything works
+        return  # ← Remove this line later once debugging is complete
+
+        # Your original enlistment logic continues below this line
+        # embed = discord.Embed(...)
+        # view = RegimentView(...)
+        # await ctx.send(embed=embed, view=view)
+
+    except Exception as e:
+        await ctx.send(f"❌ Debug Error: {type(e).__name__} - {e}")
+
 # Run bot
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
