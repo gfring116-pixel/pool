@@ -916,68 +916,55 @@ async def enlist(ctx, *, member_input=None):
 
 import os
 import json
+import discord
+from discord.ext import commands
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from dotenv import load_dotenv
 
-print("🚀 Starting Google Sheets Debug...")
+load_dotenv()
 
-# Load and parse credentials
+intents = discord.Intents.default()
+intents.members = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Load Google credentials
 credentials_str = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_str:
-    raise ValueError("❌ Missing GOOGLE_CREDENTIALS_JSON")
+    raise ValueError("Missing GOOGLE_CREDENTIALS_JSON")
 
-try:
-    creds_dict = json.loads(credentials_str)
-    print("✅ Credentials loaded and parsed.")
-except Exception as e:
-    print("❌ Failed to parse JSON:", e)
-    raise
+creds_dict = json.loads(credentials_str)
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
 
-# Authorize with Google Sheets API
-try:
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    print("✅ Google Sheets client authorized.")
-except Exception as e:
-    print("❌ Authorization failed:", e)
-    raise
+# Open the sheet
+sheet = client.open("Points Tracker").sheet1
 
-# Try opening the sheet
-try:
-    sheet = client.open("Points Tracker").sheet1
-    print("✅ Successfully opened 'Points Tracker' spreadsheet.")
-except Exception as e:
-    print("❌ Failed to open spreadsheet:", e)
-    raise
-
-# Test function
+# Function to update or add points in the sheet
 def update_points(user_id, username, points_to_add):
-    print(f"🔍 Looking up user: {user_id} ({username})")
-    try:
-        records = sheet.get_all_records()
-        for i, row in enumerate(records, start=2):
-            if str(row["User ID"]) == str(user_id):
-                current_points = int(row["Points"])
-                new_total = current_points + points_to_add
-                sheet.update_cell(i, 3, new_total)
-                print(f"✅ Updated points for {username}: {new_total}")
-                return new_total
-        sheet.append_row([user_id, username, points_to_add])
-        print(f"➕ Added new user {username} with {points_to_add} points.")
-        return points_to_add
-    except Exception as e:
-        print("❌ Error updating points:", e)
-        raise
+    records = sheet.get_all_records()
+    for i, row in enumerate(records, start=2):
+        if str(row["User ID"]) == str(user_id):
+            current_points = int(row["Points"])
+            new_total = current_points + points_to_add
+            sheet.update_cell(i, 3, new_total)
+            return new_total
+    sheet.append_row([user_id, username, points_to_add])
+    return points_to_add
 
-# Run the test
-if __name__ == "__main__":
-    print("🚨 Running test update...")
-    update_points("123456789012345678", "Nathan", 10)
-    print("🎉 Test completed.")
+# Discord command
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def givepoints(ctx, member: discord.Member, points: int):
+    try:
+        new_total = update_points(member.id, member.name, points)
+        await ctx.send(f"Gave **{points}** points to {member.mention}. Total is now **{new_total}**.")
+    except Exception as e:
+        await ctx.send(f"❌ Error updating points: {str(e)}")
 
 # Run bot
 if __name__ == "__main__":
