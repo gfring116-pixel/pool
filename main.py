@@ -924,7 +924,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 load_dotenv()
 
 # Get and parse the credentials JSON from the environment variable
-credentials_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+credentials_str = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_str:
     raise ValueError("GOOGLE_CREDENTIALS_JSON not found in environment variables.")
 
