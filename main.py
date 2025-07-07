@@ -914,6 +914,60 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
+import os
+import json
+import gspread
+from dotenv import load_dotenv
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Load environment variables from .env
+load_dotenv()
+
+# Get and parse the credentials JSON from the environment variable
+credentials_str = os.getenv("GOOGLE_CREDENTIALS")
+if not credentials_str:
+    raise ValueError("GOOGLE_CREDENTIALS_JSON not found in environment variables.")
+
+creds_dict = json.loads(credentials_str)
+
+# Set up the Google Sheets API client
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+
+# Open the Google Sheet by name
+try:
+    sheet = client.open("Points Tracker").sheet1  # Make sure this matches the name of your Google Sheet
+except gspread.exceptions.SpreadsheetNotFound:
+    raise Exception("Google Sheet 'Points Tracker' not found or not shared with the service account.")
+
+# Function to update a user's points
+def update_points(user_id, username, points_to_add):
+    print(f"🔍 Searching for user ID: {user_id}")
+    records = sheet.get_all_records()
+
+    for i, row in enumerate(records, start=2):  # Skip header row
+        if str(row["User ID"]) == str(user_id):
+            current_points = int(row["Points"])
+            new_total = current_points + points_to_add
+            sheet.update_cell(i, 3, new_total)  # Column C is Points
+            print(f"✅ Updated {username}'s points to {new_total} (was {current_points})")
+            return new_total
+
+    # If not found, append a new row
+    sheet.append_row([user_id, username, points_to_add])
+    print(f"➕ Added new user {username} with {points_to_add} points.")
+    return points_to_add
+
+# Run test when script is run directly
+if __name__ == "__main__":
+    print("🚀 Running debug test...")
+    test_user_id = "123456789012345678"
+    test_username = "Nathan"
+    test_points = 10
+
+    final_points = update_points(test_user_id, test_username, test_points)
+    print(f"🎯 Final points for {test_username}: {final_points}")
 
 # Run bot
 if __name__ == "__main__":
