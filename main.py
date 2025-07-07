@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 # Configuration
 AUTHORIZED_ROLES = {1255061914732597268, 1382604947924979793, 1279450222287655023, 1134711656811855942}
 REGIMENT_ROLES = {
-    '3rd': {'role_id': 1357959629359026267, 'prefix': '{3RD}', 'emoji': ':3rdregiment:'},
-    '4th': {'role_id': 1251102603174215750, 'prefix': '{4TH}', 'emoji': ':4thregiment:'},
-    'mp': {'role_id': 1320153442244886598, 'prefix': '{MP}', 'emoji': ':Feldgendarmerie:'},
-    '1as': {'role_id': 1339571735028174919, 'prefix': '{1AS}', 'emoji': ':emoji_47:'},
-    '1st': {'role_id': 1387191982866038919, 'prefix': '{1ST}', 'emoji': ':1stregiment:'},
-    '6th': {'role_id': 1234503490886176849, 'prefix': '{6TH}', 'emoji': ':stromtroopers:'}
+    '3rd': {'role_id': 1357959629359026267, 'prefix': '{3RD}', 'emoji': '🚚'},
+    '4th': {'role_id': 1251102603174215750, 'prefix': '{4TH}', 'emoji': '🪖'},
+    'mp': {'role_id': 1320153442244886598, 'prefix': '{MP}', 'emoji': '🛡️'},
+    '1as': {'role_id': 1339571735028174919, 'prefix': '{1AS}', 'emoji': '🛩️'},
+    '1st': {'role_id': 1387191982866038919, 'prefix': '{1ST}', 'emoji': '🗡️'},
+    '6th': {'role_id': 1234503490886176849, 'prefix': '{6TH}', 'emoji': '⚔️'}
 }
 
 # Bot setup
