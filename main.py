@@ -914,58 +914,6 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
-import os
-import json
-import discord
-from discord.ext import commands
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from dotenv import load_dotenv
-
-load_dotenv()
-
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# Load Google credentials
-credentials_str = os.getenv("GOOGLE_CREDENTIALS")
-if not credentials_str:
-    raise ValueError("Missing GOOGLE_CREDENTIALS_JSON")
-
-creds_dict = json.loads(credentials_str)
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
-
-# Open the sheet
-sheet = client.open("Points Tracker").sheet1
-
-# Function to update or add points in the sheet
-def update_points(user_id, username, points_to_add):
-    records = sheet.get_all_records()
-    for i, row in enumerate(records, start=2):
-        if str(row["User ID"]) == str(user_id):
-            current_points = int(row["Points"])
-            new_total = current_points + points_to_add
-            sheet.update_cell(i, 3, new_total)
-            return new_total
-    sheet.append_row([user_id, username, points_to_add])
-    return points_to_add
-
-# Discord command
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def givepoints(ctx, member: discord.Member, points: int):
-    try:
-        new_total = update_points(member.id, member.name, points)
-        await ctx.send(f"Gave **{points}** points to {member.mention}. Total is now **{new_total}**.")
-    except Exception as e:
-        await ctx.send(f"❌ Error updating points: {str(e)}")
 
 # Run bot
 if __name__ == "__main__":
