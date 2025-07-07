@@ -823,8 +823,7 @@ async def delrole(ctx, *, role_name):
     except Exception as e:
         await ctx.send(f"something broke: {str(e)}")
             
-            # Clean up session - confirmation view will handle it
-    del active_sessions[message.author.id]
+        
     
     # Process commands
     await bot.process_commands(message)
