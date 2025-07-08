@@ -914,7 +914,7 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
-# military_points_bot.py (debug mode enabled)
+# military_points_bot.py (full debug logging enabled)
 
 import os
 import json
@@ -922,7 +922,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import gspread
-from dotenv load_dotenv
+from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
@@ -1015,6 +1015,130 @@ def update_points(user_id, username, points_to_add):
     sheet.append_row([user_id, username, points_to_add])
     return points_to_add, points_to_add
 
+# Slash Commands
+@tree.command(name="awardpoints")
+@app_commands.describe(user="User to award", points="Number of points")
+async def awardpoints(interaction: discord.Interaction, user: discord.Member, points: int):
+    log_debug(f"/awardpoints by {interaction.user} → {user} +{points}")
+    try:
+        if not any(role.id in HOST_ROLES for role in interaction.user.roles):
+            await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+            return
+        total, monthly = update_points(user.id, user.name, points)
+        await interaction.response.send_message(f"{user.mention} was awarded **{points}** points. Total: **{total}**, Month: **{monthly}**")
+    except Exception as e:
+        log_debug(f"Error in /awardpoints: {e}")
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+@tree.command(name="mypoints")
+async def mypoints(interaction: discord.Interaction):
+    log_debug(f"/mypoints used by {interaction.user}")
+    try:
+        user_id = str(interaction.user.id)
+        now = datetime.utcnow()
+        current_month = now.strftime("%Y-%m")
+        records = sheet.get_all_records()
+        for row in records:
+            if str(row["User ID"]) == user_id:
+                total = row["Total Points"]
+                monthly = row.get(f"{current_month} Points", 0)
+                await interaction.response.send_message(f"**{interaction.user.display_name}**, you have **{total}** total points and **{monthly}** this month.")
+                return
+        await interaction.response.send_message("You don't have any points yet.")
+    except Exception as e:
+        log_debug(f"Error in /mypoints: {e}")
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+@tree.command(name="pointsneeded")
+async def pointsneeded(interaction: discord.Interaction):
+    log_debug(f"/pointsneeded used by {interaction.user}")
+    try:
+        user_id = str(interaction.user.id)
+        records = sheet.get_all_records()
+        for row in records:
+            if str(row["User ID"]) == user_id:
+                total_points = int(row["Total Points"])
+                for threshold, name, abbr, role_id in RANKS:
+                    if total_points < threshold:
+                        await interaction.response.send_message(f"You need **{threshold - total_points}** more points to reach **{name}**.")
+                        return
+                await interaction.response.send_message("🎉 You have reached the highest rank!")
+                return
+        await interaction.response.send_message("You don't have any points yet.")
+    except Exception as e:
+        log_debug(f"Error in /pointsneeded: {e}")
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+@tree.command(name="leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    log_debug("/leaderboard triggered")
+    try:
+        records = sheet.get_all_records()
+        sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
+        top = sorted_records[:10]
+        msg = "**🏆 Leaderboard – Top 10**\n"
+        for i, user in enumerate(top, start=1):
+            msg += f"**{i}.** {user['Username']} — {user['Total Points']} pts\n"
+        await interaction.response.send_message(msg)
+    except Exception as e:
+        log_debug(f"Error in /leaderboard: {e}")
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+@tree.command(name="promote")
+@app_commands.describe(user="User to promote")
+async def promote(interaction: discord.Interaction, user: discord.Member):
+    log_debug(f"/promote triggered by {interaction.user} for {user}")
+    try:
+        if not any(role.id in HOST_ROLES for role in interaction.user.roles):
+            await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+            return
+        user_id = str(user.id)
+        records = sheet.get_all_records()
+        for row in records:
+            if str(row["User ID"]) == user_id:
+                points = int(row["Total Points"])
+                new_rank = get_rank(points)
+                regiment = get_regiment(user)
+                nickname = f"{regiment} {new_rank[2]} {user.name}"
+                await user.edit(nick=nickname)
+                for _, _, _, rid in RANKS:
+                    role = interaction.guild.get_role(rid)
+                    if role in user.roles:
+                        await user.remove_roles(role)
+                await user.add_roles(interaction.guild.get_role(new_rank[3]))
+                await interaction.response.send_message(f"{user.mention} has been promoted to **{new_rank[1]}**!")
+                return
+        await interaction.response.send_message("User not found in points tracker.")
+    except Exception as e:
+        log_debug(f"Error in /promote: {e}")
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+@tree.command(name="selfpromote")
+async def selfpromote(interaction: discord.Interaction):
+    log_debug(f"/selfpromote used by {interaction.user}")
+    try:
+        member = interaction.user
+        user_id = str(member.id)
+        records = sheet.get_all_records()
+        for row in records:
+            if str(row["User ID"]) == user_id:
+                points = int(row["Total Points"])
+                new_rank = get_rank(points)
+                regiment = get_regiment(member)
+                nickname = f"{regiment} {new_rank[2]} {member.name}"
+                await member.edit(nick=nickname)
+                for _, _, _, rid in RANKS:
+                    role = interaction.guild.get_role(rid)
+                    if role in member.roles:
+                        await member.remove_roles(role)
+                await member.add_roles(interaction.guild.get_role(new_rank[3]))
+                await interaction.response.send_message(f"You have been promoted to **{new_rank[1]}**!")
+                return
+        await interaction.response.send_message("You don't have any points yet.")
+    except Exception as e:
+        log_debug(f"Error in /selfpromote: {e}")
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
 @tree.command(name="debug")
 async def debug(interaction: discord.Interaction):
     try:
@@ -1031,8 +1155,7 @@ async def on_ready():
         log_debug("Slash commands synced successfully.")
         print(f"✅ Logged in as {bot.user}")
     except Exception as e:
-        log_debug(f"Error syncing commands: {e}")
-        
+        log_debug(f"Error syncing commands: {e}")        
     
 # Run bot
 if __name__ == "__main__":
