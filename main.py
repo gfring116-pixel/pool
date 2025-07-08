@@ -914,12 +914,11 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
-# military_points_bot.py (patched for display names + row match fixes)
+# military_points_bot.py (prefix version with embed support)
 
 import os
 import json
 import discord
-from discord import app_commands
 from discord.ext import commands
 import gspread
 from dotenv import load_dotenv
@@ -932,22 +931,14 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
-
-def log_debug(message):
-    print(f"[DEBUG] {message}")
 
 # Google Sheets Setup
-try:
-    credentials_str = os.getenv("GOOGLE_CREDENTIALS")
-    creds_dict = json.loads(credentials_str)
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open("Points Tracker").sheet1
-    log_debug("Google Sheets successfully connected.")
-except Exception as e:
-    log_debug(f"Google Sheets error: {e}")
+credentials_str = os.getenv("GOOGLE_CREDENTIALS")
+creds_dict = json.loads(credentials_str)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+sheet = client.open("Points Tracker").sheet1
 
 # Role IDs for regiments
 REGIMENT_ROLES = {
@@ -993,14 +984,12 @@ def get_rank(points):
     return current_rank
 
 def update_points(user_id, username, points_to_add):
-    log_debug(f"Updating points for user {username} ({user_id})")
     records = sheet.get_all_records()
     now = datetime.utcnow()
     current_month = now.strftime("%Y-%m")
 
     for i, row in enumerate(records, start=2):
         if str(row.get("User ID")) == str(user_id):
-            log_debug(f"User found in sheet. Adding {points_to_add} points.")
             total = int(row["Total Points"]) + points_to_add
             monthly_key = f"{current_month} Points"
             if monthly_key not in row:
@@ -1011,121 +1000,121 @@ def update_points(user_id, username, points_to_add):
             sheet.update_cell(i, list(row.keys()).index(monthly_key) + 1, new_monthly)
             return total, new_monthly
 
-    log_debug("User not found in sheet. Appending new row.")
+    # If not found, add new
     sheet.append_row([str(user_id), str(username), points_to_add])
     return points_to_add, points_to_add
 
-@tree.command(name="leaderboard")
-async def leaderboard(interaction: discord.Interaction):
-    log_debug("/leaderboard triggered")
-    try:
-        records = sheet.get_all_records()
-        sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
-        top = sorted_records[:10]
-        msg = "**🏆 Leaderboard – Top 10**\n"
-        for i, user in enumerate(top, start=1):
-            member = interaction.guild.get_member(int(user['User ID']))
-            name = member.display_name if member else user['Username']
-            msg += f"**{i}.** {name} — {user['Total Points']} pts\n"
-        await interaction.response.send_message(msg)
-    except Exception as e:
-        log_debug(f"Error in /leaderboard: {e}")
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+@bot.command()
+async def points(ctx):
+    embed = discord.Embed(title="📌 Military Points System Commands", color=discord.Color.gold())
+    embed.add_field(name="!awardpoints @user [amount]", value="Give points to a user (Host only).", inline=False)
+    embed.add_field(name="!mypoints", value="See your total and monthly points.", inline=False)
+    embed.add_field(name="!leaderboard", value="View the top 10 soldiers.", inline=False)
+    embed.add_field(name="!pointsneeded", value="See how many more points you need for your next rank.", inline=False)
+    embed.add_field(name="!promote @user", value="Promote someone based on their points (Host only).", inline=False)
+    embed.add_field(name="!selfpromote", value="Promote yourself if eligible.", inline=False)
+    await ctx.send(embed=embed)
 
-@tree.command(name="mypoints")
-async def mypoints(interaction: discord.Interaction):
-    log_debug(f"/mypoints used by {interaction.user}")
-    try:
-        user_id = str(interaction.user.id)
-        now = datetime.utcnow()
-        current_month = now.strftime("%Y-%m")
-        records = sheet.get_all_records()
-        for row in records:
-            if str(row.get("User ID")) == user_id:
-                total = row["Total Points"]
-                monthly = row.get(f"{current_month} Points", 0)
-                await interaction.response.send_message(f"**{interaction.user.display_name}**, you have **{total}** total points and **{monthly}** this month.")
-                return
-        await interaction.response.send_message("You don't have any points yet.")
-    except Exception as e:
-        log_debug(f"Error in /mypoints: {e}")
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+@bot.command()
+async def awardpoints(ctx, member: discord.Member, amount: int):
+    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
+        return await ctx.send("❌ You do not have permission to use this command.")
+    total, monthly = update_points(member.id, member.name, amount)
+    embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
+    embed.add_field(name="User", value=member.mention, inline=True)
+    embed.add_field(name="Points Given", value=str(amount), inline=True)
+    embed.add_field(name="Total Points", value=str(total), inline=True)
+    await ctx.send(embed=embed)
 
-@tree.command(name="pointsneeded")
-async def pointsneeded(interaction: discord.Interaction):
-    log_debug(f"/pointsneeded used by {interaction.user}")
-    try:
-        user_id = str(interaction.user.id)
-        records = sheet.get_all_records()
-        for row in records:
-            if str(row.get("User ID")) == user_id:
-                total_points = int(row["Total Points"])
-                for threshold, name, abbr, role_id in RANKS:
-                    if total_points < threshold:
-                        await interaction.response.send_message(f"You need **{threshold - total_points}** more points to reach **{name}**.")
-                        return
-                await interaction.response.send_message("🎉 You have reached the highest rank!")
-                return
-        await interaction.response.send_message("You don't have any points yet.")
-    except Exception as e:
-        log_debug(f"Error in /pointsneeded: {e}")
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
-
-@tree.command(name="promote")
-@app_commands.describe(user="User to promote")
-async def promote(interaction: discord.Interaction, user: discord.Member):
-    log_debug(f"/promote triggered by {interaction.user} for {user}")
-    try:
-        if not any(role.id in HOST_ROLES for role in interaction.user.roles):
-            await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+@bot.command()
+async def mypoints(ctx):
+    user_id = str(ctx.author.id)
+    now = datetime.utcnow()
+    current_month = now.strftime("%Y-%m")
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row.get("User ID")) == user_id:
+            total = row["Total Points"]
+            monthly = row.get(f"{current_month} Points", 0)
+            embed = discord.Embed(title="📊 Your Points", color=discord.Color.blue())
+            embed.add_field(name="Total Points", value=str(total))
+            embed.add_field(name="This Month", value=str(monthly))
+            await ctx.send(embed=embed)
             return
-        user_id = str(user.id)
-        records = sheet.get_all_records()
-        for row in records:
-            if str(row.get("User ID")) == user_id:
-                points = int(row["Total Points"])
-                new_rank = get_rank(points)
-                regiment = get_regiment(user)
-                nickname = f"{regiment} {new_rank[2]} {user.name}"
-                await user.edit(nick=nickname)
-                for _, _, _, rid in RANKS:
-                    role = interaction.guild.get_role(rid)
-                    if role in user.roles:
-                        await user.remove_roles(role)
-                await user.add_roles(interaction.guild.get_role(new_rank[3]))
-                await interaction.response.send_message(f"{user.mention} has been promoted to **{new_rank[1]}**!")
-                return
-        await interaction.response.send_message("User not found in points tracker.")
-    except Exception as e:
-        log_debug(f"Error in /promote: {e}")
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+    await ctx.send("❌ You don't have any points yet.")
 
-@tree.command(name="selfpromote")
-async def selfpromote(interaction: discord.Interaction):
-    log_debug(f"/selfpromote used by {interaction.user}")
-    try:
-        member = interaction.user
-        user_id = str(member.id)
-        records = sheet.get_all_records()
-        for row in records:
-            if str(row.get("User ID")) == user_id:
-                points = int(row["Total Points"])
-                new_rank = get_rank(points)
-                regiment = get_regiment(member)
-                nickname = f"{regiment} {new_rank[2]} {member.name}"
-                await member.edit(nick=nickname)
-                for _, _, _, rid in RANKS:
-                    role = interaction.guild.get_role(rid)
-                    if role in member.roles:
-                        await member.remove_roles(role)
-                await member.add_roles(interaction.guild.get_role(new_rank[3]))
-                await interaction.response.send_message(f"You have been promoted to **{new_rank[1]}**!")
-                return
-        await interaction.response.send_message("You don't have any points yet.")
-    except Exception as e:
-        log_debug(f"Error in /selfpromote: {e}")
-        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
-        
+@bot.command()
+async def pointsneeded(ctx):
+    user_id = str(ctx.author.id)
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row.get("User ID")) == user_id:
+            total = int(row["Total Points"])
+            for threshold, name, abbr, role_id in RANKS:
+                if total < threshold:
+                    embed = discord.Embed(title="📈 Promotion Progress", description=f"You need **{threshold - total}** more points to reach **{name}**.", color=discord.Color.orange())
+                    await ctx.send(embed=embed)
+                    return
+            await ctx.send("🎉 You have reached the highest rank!")
+            return
+    await ctx.send("❌ You don't have any points yet.")
+
+@bot.command()
+async def leaderboard(ctx):
+    records = sheet.get_all_records()
+    sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
+    embed = discord.Embed(title="🏆 Leaderboard – Top 10", color=discord.Color.purple())
+    for i, user in enumerate(sorted_records[:10], start=1):
+        member = ctx.guild.get_member(int(user["User ID"]))
+        name = member.display_name if member else user['Username']
+        embed.add_field(name=f"{i}. {name}", value=f"{user['Total Points']} pts", inline=False)
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def promote(ctx, member: discord.Member):
+    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
+        return await ctx.send("❌ You do not have permission to use this command.")
+    user_id = str(member.id)
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row.get("User ID")) == user_id:
+            points = int(row["Total Points"])
+            rank = get_rank(points)
+            regiment = get_regiment(member)
+            nickname = f"{regiment} {rank[2]} {member.name}"
+            await member.edit(nick=nickname)
+            for _, _, _, rid in RANKS:
+                role = ctx.guild.get_role(rid)
+                if role in member.roles:
+                    await member.remove_roles(role)
+            await member.add_roles(ctx.guild.get_role(rank[3]))
+            embed = discord.Embed(title="📈 Promotion", description=f"{member.mention} has been promoted to **{rank[1]}**!", color=discord.Color.green())
+            await ctx.send(embed=embed)
+            return
+    await ctx.send("❌ User not found in tracker.")
+
+@bot.command()
+async def selfpromote(ctx):
+    member = ctx.author
+    user_id = str(member.id)
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row.get("User ID")) == user_id:
+            points = int(row["Total Points"])
+            rank = get_rank(points)
+            regiment = get_regiment(member)
+            nickname = f"{regiment} {rank[2]} {member.name}"
+            await member.edit(nick=nickname)
+            for _, _, _, rid in RANKS:
+                role = ctx.guild.get_role(rid)
+                if role in member.roles:
+                    await member.remove_roles(role)
+            await member.add_roles(ctx.guild.get_role(rank[3]))
+            embed = discord.Embed(title="📈 Self Promotion", description=f"You have been promoted to **{rank[1]}**!", color=discord.Color.green())
+            await ctx.send(embed=embed)
+            return
+    await ctx.send("❌ You don't have any points yet.")
+    
 # Run bot
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
