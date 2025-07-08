@@ -922,7 +922,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import gspread
-from dotenv load_dotenv
+from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
