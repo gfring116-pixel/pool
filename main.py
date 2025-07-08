@@ -1113,8 +1113,8 @@ async def selfpromote(ctx):
             embed = discord.Embed(title="📈 Self Promotion", description=f"You have been promoted to **{rank[1]}**!", color=discord.Color.green())
             await ctx.send(embed=embed)
             return
-    await ctx.send("❌ You don't have any points yet.")
-    
+    await ctx.send("❌ You don't have any points yet.")                 
+
 # Run bot
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
