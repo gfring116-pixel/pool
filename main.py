@@ -922,7 +922,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import gspread
-from dotenv import load_dotenv
+from dotenv load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
@@ -1032,8 +1032,7 @@ async def on_ready():
         print(f"✅ Logged in as {bot.user}")
     except Exception as e:
         log_debug(f"Error syncing commands: {e}")
-
-
+        
     
 # Run bot
 if __name__ == "__main__":
