@@ -914,7 +914,7 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
-# military_points_bot.py (complete with all slash commands)
+# military_points_bot.py (debug mode enabled)
 
 import os
 import json
@@ -922,7 +922,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import gspread
-from dotenv import load_dotenv
+from dotenv load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
@@ -934,13 +934,20 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
+def log_debug(message):
+    print(f"[DEBUG] {message}")
+
 # Google Sheets Setup
-credentials_str = os.getenv("GOOGLE_CREDENTIALS")
-creds_dict = json.loads(credentials_str)
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
-sheet = client.open("Points Tracker").sheet1
+try:
+    credentials_str = os.getenv("GOOGLE_CREDENTIALS")
+    creds_dict = json.loads(credentials_str)
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("Points Tracker").sheet1
+    log_debug("Google Sheets successfully connected.")
+except Exception as e:
+    log_debug(f"Google Sheets error: {e}")
 
 # Role IDs for regiments
 REGIMENT_ROLES = {
@@ -986,12 +993,14 @@ def get_rank(points):
     return current_rank
 
 def update_points(user_id, username, points_to_add):
+    log_debug(f"Updating points for user {username} ({user_id})")
     records = sheet.get_all_records()
     now = datetime.utcnow()
     current_month = now.strftime("%Y-%m")
 
     for i, row in enumerate(records, start=2):
         if str(row["User ID"]) == str(user_id):
+            log_debug(f"User found in sheet. Adding {points_to_add} points.")
             total = int(row["Total Points"]) + points_to_add
             monthly_key = f"{current_month} Points"
             if monthly_key not in row:
@@ -1002,108 +1011,30 @@ def update_points(user_id, username, points_to_add):
             sheet.update_cell(i, list(row.keys()).index(monthly_key) + 1, new_monthly)
             return total, new_monthly
 
+    log_debug("User not found in sheet. Appending new row.")
     sheet.append_row([user_id, username, points_to_add])
     return points_to_add, points_to_add
 
-# Slash: /awardpoints
-@tree.command(name="awardpoints")
-@app_commands.describe(user="User to award", points="Number of points")
-async def awardpoints(interaction: discord.Interaction, user: discord.Member, points: int):
-    if not any(role.id in HOST_ROLES for role in interaction.user.roles):
-        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
-        return
-    total, monthly = update_points(user.id, user.name, points)
-    await interaction.response.send_message(f"{user.mention} was awarded **{points}** points. Total: **{total}**, Month: **{monthly}**")
+@tree.command(name="debug")
+async def debug(interaction: discord.Interaction):
+    try:
+        log_debug(f"/debug triggered by {interaction.user.name} ({interaction.user.id})")
+        await interaction.response.send_message("✅ Bot is alive and responding.")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+        log_debug(f"Error in /debug: {e}")
 
-# Slash: /mypoints
-@tree.command(name="mypoints")
-async def mypoints(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    now = datetime.utcnow()
-    current_month = now.strftime("%Y-%m")
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row["User ID"]) == user_id:
-            total = row["Total Points"]
-            monthly = row.get(f"{current_month} Points", 0)
-            await interaction.response.send_message(f"**{interaction.user.display_name}**, you have **{total}** total points and **{monthly}** this month.")
-            return
-    await interaction.response.send_message("You don't have any points yet.")
+@bot.event
+async def on_ready():
+    try:
+        await tree.sync()
+        log_debug("Slash commands synced successfully.")
+        print(f"✅ Logged in as {bot.user}")
+    except Exception as e:
+        log_debug(f"Error syncing commands: {e}")
 
-# Slash: /pointsneeded
-@tree.command(name="pointsneeded")
-async def pointsneeded(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row["User ID"]) == user_id:
-            total_points = int(row["Total Points"])
-            for threshold, name, abbr, role_id in RANKS:
-                if total_points < threshold:
-                    await interaction.response.send_message(f"You need **{threshold - total_points}** more points to reach **{name}**.")
-                    return
-            await interaction.response.send_message("🎉 You have reached the highest rank!")
-            return
-    await interaction.response.send_message("You don't have any points yet.")
 
-# Slash: /leaderboard
-@tree.command(name="leaderboard")
-async def leaderboard(interaction: discord.Interaction):
-    records = sheet.get_all_records()
-    sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
-    top = sorted_records[:10]
-    msg = "**🏆 Leaderboard – Top 10**\n"
-    for i, user in enumerate(top, start=1):
-        msg += f"**{i}.** {user['Username']} — {user['Total Points']} pts\n"
-    await interaction.response.send_message(msg)
-
-# Slash: /promote
-@tree.command(name="promote")
-@app_commands.describe(user="User to promote")
-async def promote(interaction: discord.Interaction, user: discord.Member):
-    if not any(role.id in HOST_ROLES for role in interaction.user.roles):
-        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
-        return
-    user_id = str(user.id)
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row["User ID"]) == user_id:
-            points = int(row["Total Points"])
-            new_rank = get_rank(points)
-            regiment = get_regiment(user)
-            nickname = f"{regiment} {new_rank[2]} {user.name}"
-            await user.edit(nick=nickname)
-            for _, _, _, rid in RANKS:
-                role = interaction.guild.get_role(rid)
-                if role in user.roles:
-                    await user.remove_roles(role)
-            await user.add_roles(interaction.guild.get_role(new_rank[3]))
-            await interaction.response.send_message(f"{user.mention} has been promoted to **{new_rank[1]}**!")
-            return
-    await interaction.response.send_message("User not found in points tracker.")
-
-# Slash: /selfpromote
-@tree.command(name="selfpromote")
-async def selfpromote(interaction: discord.Interaction):
-    member = interaction.user
-    user_id = str(member.id)
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row["User ID"]) == user_id:
-            points = int(row["Total Points"])
-            new_rank = get_rank(points)
-            regiment = get_regiment(member)
-            nickname = f"{regiment} {new_rank[2]} {member.name}"
-            await member.edit(nick=nickname)
-            for _, _, _, rid in RANKS:
-                role = interaction.guild.get_role(rid)
-                if role in member.roles:
-                    await member.remove_roles(role)
-            await member.add_roles(interaction.guild.get_role(new_rank[3]))
-            await interaction.response.send_message(f"You have been promoted to **{new_rank[1]}**!")
-            return
-    await interaction.response.send_message("You don't have any points yet.")
-
+    
 # Run bot
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
