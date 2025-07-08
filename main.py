@@ -914,6 +914,195 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
+# military_points_bot.py (complete with all slash commands)
+
+import os
+import json
+import discord
+from discord import app_commands
+from discord.ext import commands
+import gspread
+from dotenv import load_dotenv
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+
+load_dotenv()
+
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree
+
+# Google Sheets Setup
+credentials_str = os.getenv("GOOGLE_CREDENTIALS")
+creds_dict = json.loads(credentials_str)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+sheet = client.open("Points Tracker").sheet1
+
+# Role IDs for regiments
+REGIMENT_ROLES = {
+    1320153442244886598: "MP",
+    1234503490886176849: "6TH",
+    1357959629359026267: "3RD",
+    1387191982866038919: "1ST",
+    1251102603174215750: "4TH",
+    1339571735028174919: "1AS"
+}
+
+# Host-only roles
+HOST_ROLES = {
+    1255061914732597268,
+    1134711656811855942,
+    1279450222287655023
+}
+
+# Rank thresholds and abbreviations
+RANKS = [
+    (0, "Recruit", "RCT", 1207981849528246282),
+    (15, "Soldat", "SLD", 1214438109173907546),
+    (65, "Corporal", "CPL", 1208374047994281985),
+    (150, "Junior Sergeant", "JSGT", 1225058657507606600),
+    (275, "Sergeant", "SGT", 1207980351826173962),
+    (385, "Staff Sergeant", "SSGT", 1214438711379370034),
+    (555, "Sergeant Major", "SMJ", 1207980354317844521),
+    (700, "Master Sergeant", "MSGT", 1214438714508312596)
+]
+
+# Helper functions
+def get_regiment(member):
+    for role in member.roles:
+        if role.id in REGIMENT_ROLES:
+            return REGIMENT_ROLES[role.id]
+    return "Officer"
+
+def get_rank(points):
+    current_rank = RANKS[0]
+    for rank in RANKS:
+        if points >= rank[0]:
+            current_rank = rank
+    return current_rank
+
+def update_points(user_id, username, points_to_add):
+    records = sheet.get_all_records()
+    now = datetime.utcnow()
+    current_month = now.strftime("%Y-%m")
+
+    for i, row in enumerate(records, start=2):
+        if str(row["User ID"]) == str(user_id):
+            total = int(row["Total Points"]) + points_to_add
+            monthly_key = f"{current_month} Points"
+            if monthly_key not in row:
+                sheet.update_cell(1, len(row) + 1, monthly_key)
+                row[monthly_key] = 0
+            new_monthly = int(row.get(monthly_key, 0)) + points_to_add
+            sheet.update_cell(i, 3, total)
+            sheet.update_cell(i, list(row.keys()).index(monthly_key) + 1, new_monthly)
+            return total, new_monthly
+
+    sheet.append_row([user_id, username, points_to_add])
+    return points_to_add, points_to_add
+
+# Slash: /awardpoints
+@tree.command(name="awardpoints")
+@app_commands.describe(user="User to award", points="Number of points")
+async def awardpoints(interaction: discord.Interaction, user: discord.Member, points: int):
+    if not any(role.id in HOST_ROLES for role in interaction.user.roles):
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+    total, monthly = update_points(user.id, user.name, points)
+    await interaction.response.send_message(f"{user.mention} was awarded **{points}** points. Total: **{total}**, Month: **{monthly}**")
+
+# Slash: /mypoints
+@tree.command(name="mypoints")
+async def mypoints(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    now = datetime.utcnow()
+    current_month = now.strftime("%Y-%m")
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row["User ID"]) == user_id:
+            total = row["Total Points"]
+            monthly = row.get(f"{current_month} Points", 0)
+            await interaction.response.send_message(f"**{interaction.user.display_name}**, you have **{total}** total points and **{monthly}** this month.")
+            return
+    await interaction.response.send_message("You don't have any points yet.")
+
+# Slash: /pointsneeded
+@tree.command(name="pointsneeded")
+async def pointsneeded(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row["User ID"]) == user_id:
+            total_points = int(row["Total Points"])
+            for threshold, name, abbr, role_id in RANKS:
+                if total_points < threshold:
+                    await interaction.response.send_message(f"You need **{threshold - total_points}** more points to reach **{name}**.")
+                    return
+            await interaction.response.send_message("🎉 You have reached the highest rank!")
+            return
+    await interaction.response.send_message("You don't have any points yet.")
+
+# Slash: /leaderboard
+@tree.command(name="leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    records = sheet.get_all_records()
+    sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
+    top = sorted_records[:10]
+    msg = "**🏆 Leaderboard – Top 10**\n"
+    for i, user in enumerate(top, start=1):
+        msg += f"**{i}.** {user['Username']} — {user['Total Points']} pts\n"
+    await interaction.response.send_message(msg)
+
+# Slash: /promote
+@tree.command(name="promote")
+@app_commands.describe(user="User to promote")
+async def promote(interaction: discord.Interaction, user: discord.Member):
+    if not any(role.id in HOST_ROLES for role in interaction.user.roles):
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+    user_id = str(user.id)
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row["User ID"]) == user_id:
+            points = int(row["Total Points"])
+            new_rank = get_rank(points)
+            regiment = get_regiment(user)
+            nickname = f"{regiment} {new_rank[2]} {user.name}"
+            await user.edit(nick=nickname)
+            for _, _, _, rid in RANKS:
+                role = interaction.guild.get_role(rid)
+                if role in user.roles:
+                    await user.remove_roles(role)
+            await user.add_roles(interaction.guild.get_role(new_rank[3]))
+            await interaction.response.send_message(f"{user.mention} has been promoted to **{new_rank[1]}**!")
+            return
+    await interaction.response.send_message("User not found in points tracker.")
+
+# Slash: /selfpromote
+@tree.command(name="selfpromote")
+async def selfpromote(interaction: discord.Interaction):
+    member = interaction.user
+    user_id = str(member.id)
+    records = sheet.get_all_records()
+    for row in records:
+        if str(row["User ID"]) == user_id:
+            points = int(row["Total Points"])
+            new_rank = get_rank(points)
+            regiment = get_regiment(member)
+            nickname = f"{regiment} {new_rank[2]} {member.name}"
+            await member.edit(nick=nickname)
+            for _, _, _, rid in RANKS:
+                role = interaction.guild.get_role(rid)
+                if role in member.roles:
+                    await member.remove_roles(role)
+            await member.add_roles(interaction.guild.get_role(new_rank[3]))
+            await interaction.response.send_message(f"You have been promoted to **{new_rank[1]}**!")
+            return
+    await interaction.response.send_message("You don't have any points yet.")
 
 # Run bot
 if __name__ == "__main__":
