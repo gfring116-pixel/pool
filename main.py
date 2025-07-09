@@ -1144,16 +1144,16 @@ async def awardpoints(ctx, user_input: str, amount: int):
         total = amount
 
     embed = discord.Embed(
-        title="✅ Merit Awarded",
-        description=(
-            f"👤 **{roblox_username}**\n"
-            f"🎖️ **Regiment:** {info['header']}\n"
-            f"➕ **Awarded:** {amount} points\n"
-            f"📊 **Total:** {total}"
-        ),
-        color=discord.Color.green()
-    )
-    await ctx.send(embed=embed)
+    title="✅ Merit Awarded",
+    description=(
+        f"👤 **{roblox_username}**\n"
+        f"🎖️ **Regiment:** {info['header']}\n"
+        f"➕ **Awarded:** {amount} points\n"
+        f"📊 **New Total:** {total}"
+    ),
+    color=discord.Color.green()
+)
+await ctx.send(embed=embed)
 
 @bot.command()
 async def leaderboard(ctx):
