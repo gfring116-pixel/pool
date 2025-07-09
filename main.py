@@ -940,8 +940,8 @@ creds_dict = json.loads(credentials_str)
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
-sheet = client.open("Points Tracker").sheet1
-
+main_sheet = client.open("__1ST VANGUARD DIVISION MERIT DATA__").sheet1
+special_sheet = client.open("Points Tracker").sheet1
 # Role IDs for regiments
 REGIMENT_ROLES = {
     1320153442244886598: "MP",
@@ -1044,6 +1044,27 @@ async def resolve_member(ctx, input_str):
     print(f"[DEBUG] No match: {input_str}")
     return None
 
+def get_regiment_info(member):
+    role_map = {
+        1339571735028174919: ("2ND GAURDE INFANTERIE REGIMENT", "main"),   # 1AS
+        1357959629359026267: ("3RD IMPERIAL INFANTRY REGIMENT", "main"),   # 3RD
+        1251102603174215750: ("4TH RIFLE'S INFANTERIE REGIMENT", "main"),  # 4TH
+        1320153442244886598: ("MP", "special"),                            # MP
+        1387191982866038919: ("1ST", "special"),                           # 1ST
+        1234503490886176849: ("6TH", "special")                            # 6TH
+    }
+
+    for role in member.roles:
+        if role.id in role_map:
+            header, sheet_type = role_map[role.id]
+            return {
+                "header": header,
+                "sheet_type": sheet_type,
+                "regiment": role.name
+            }
+
+    return None  # Officer or unassigned
+
 @bot.command()
 async def leaderboard(ctx):
     try:
@@ -1143,37 +1164,84 @@ async def promote(ctx, *targets):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def awardpoints(ctx, *args):
+async def awardpoints(ctx, user_input: str, amount: int):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
         return await ctx.send("❌ You do not have permission.")
 
-    if len(args) < 2:
-        return await ctx.send("❌ Usage: `!awardpoints [user1] [user2] ... [amount]`")
+    if amount <= 0:
+        return await ctx.send("❌ Amount must be a positive number.")
 
-    try:
-        amount = int(args[-1])
-    except ValueError:
-        return await ctx.send("❌ The last argument must be the number of points to award.")
+    # Resolve member
+    member = None
+    if user_input.startswith("<@") and user_input.endswith(">"):
+        try:
+            member = ctx.guild.get_member(int(user_input.strip("<@!>")))
+        except:
+            pass
+    elif user_input.isdigit():
+        member = ctx.guild.get_member(int(user_input))
+    else:
+        for m in ctx.guild.members:
+            if m.name.lower() == user_input.lower() or m.display_name.lower() == user_input.lower():
+                member = m
+                break
 
-    targets = args[:-1]
-    awarded = []
-    not_found = []
+    if not member:
+        return await ctx.send(f"❌ User `{user_input}` not found.")
 
-    for target in targets:
-        member = await resolve_member(ctx, target)
-        if member:
-            total, monthly = update_points(str(member.id), member.name, amount)
-            awarded.append((member.display_name, total))
-        else:
-            not_found.append(target)
+    info = get_regiment_info(member)
+    if not info:
+        return await ctx.send("❌ Could not determine regiment or unsupported regiment.")
 
-    embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
-    for name, total in awarded:
-        embed.add_field(name=name, value=f"➕ {amount} points\n📊 Total: {total}", inline=False)
+    sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
+    sheet_data = sheet.get_all_values()
+    header = info["header"]
+    display_name = member.display_name
 
-    if not_found:
-        embed.add_field(name="⚠️ Not Found", value="\n".join(not_found), inline=False)
+    # Find header row
+    header_row = None
+    for idx, row in enumerate(sheet_data):
+        if row[0].strip().upper() == header.upper():
+            header_row = idx
+            break
 
+    if header_row is None:
+        return await ctx.send(f"❌ Header `{header}` not found in the sheet.")
+
+    # Search under that header
+    name_row = None
+    search_row = header_row + 2
+    while search_row < len(sheet_data):
+        row = sheet_data[search_row]
+        if not row[0].strip():
+            break  # End of block
+        if row[0].strip().lower() == display_name.lower():
+            name_row = search_row
+            break
+        search_row += 1
+
+    # Update or Insert
+    if name_row is not None:
+        current = int(sheet_data[name_row][1])
+        total = current + amount
+        sheet.update_cell(name_row + 1, 2, total)
+        sheet.update_note(name_row + 1, 1, f"Discord ID: {member.id}")
+    else:
+        insert_row = search_row + 1
+        sheet.insert_row([display_name, amount], insert_row)
+        sheet.update_note(insert_row, 1, f"Discord ID: {member.id}")
+        total = amount
+
+    embed = discord.Embed(
+        title="✅ Merit Awarded",
+        description=(
+            f"👤 **{display_name}**\n"
+            f"🎖️ **Regiment:** {info['header']}\n"
+            f"➕ **Awarded:** {amount} points\n"
+            f"📊 **Total:** {total}"
+        ),
+        color=discord.Color.green()
+    )
     await ctx.send(embed=embed)
 
 @bot.command()
