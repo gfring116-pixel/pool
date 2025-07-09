@@ -1189,6 +1189,13 @@ async def awardpoints(ctx, user_input: str, amount: int):
     if not member:
         return await ctx.send(f"❌ User `{user_input}` not found.")
 
+    # ✅ Get Roblox username = last part of nickname
+    if not member.display_name:
+        return await ctx.send("❌ Member has no nickname set.")
+
+    roblox_username = member.display_name.split()[-1].strip()
+
+    # ✅ Get regiment info
     info = get_regiment_info(member)
     if not info:
         return await ctx.send("❌ Could not determine regiment or unsupported regiment.")
@@ -1196,9 +1203,8 @@ async def awardpoints(ctx, user_input: str, amount: int):
     sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
     sheet_data = sheet.get_all_values()
     header = info["header"]
-    display_name = member.display_name
 
-    # Find header row
+    # ✅ Find section header
     header_row = None
     for idx, row in enumerate(sheet_data):
         if row[0].strip().upper() == header.upper():
@@ -1208,19 +1214,19 @@ async def awardpoints(ctx, user_input: str, amount: int):
     if header_row is None:
         return await ctx.send(f"❌ Header `{header}` not found in the sheet.")
 
-    # Search under that header
+    # ✅ Search under the header for Roblox username
     name_row = None
     search_row = header_row + 2
     while search_row < len(sheet_data):
         row = sheet_data[search_row]
-        if not row[0].strip():
-            break  # End of block
-        if row[0].strip().lower() == display_name.lower():
+        if not row[0].strip():  # End of block
+            break
+        if row[0].strip().lower() == roblox_username.lower():
             name_row = search_row
             break
         search_row += 1
 
-    # Update or Insert
+    # ✅ Update or insert
     if name_row is not None:
         current = int(sheet_data[name_row][1])
         total = current + amount
@@ -1228,14 +1234,14 @@ async def awardpoints(ctx, user_input: str, amount: int):
         sheet.update_note(name_row + 1, 1, f"Discord ID: {member.id}")
     else:
         insert_row = search_row + 1
-        sheet.insert_row([display_name, amount], insert_row)
+        sheet.insert_row([roblox_username, amount], insert_row)
         sheet.update_note(insert_row, 1, f"Discord ID: {member.id}")
         total = amount
 
     embed = discord.Embed(
         title="✅ Merit Awarded",
         description=(
-            f"👤 **{display_name}**\n"
+            f"👤 **{roblox_username}**\n"
             f"🎖️ **Regiment:** {info['header']}\n"
             f"➕ **Awarded:** {amount} points\n"
             f"📊 **Total:** {total}"
