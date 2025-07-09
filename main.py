@@ -1016,7 +1016,7 @@ async def resolve_member(ctx, input_str):
             user_id = int(input_str.strip("<@!>"))
             return await guild.fetch_member(user_id)
 
-        # Raw ID
+        # ID
         if input_str.isdigit():
             return await guild.fetch_member(int(input_str))
 
@@ -1112,7 +1112,7 @@ async def promote(ctx, *targets):
     records = sheet.get_all_records()
 
     for target in targets:
-        member = resolve_member(ctx, target)
+        member = await resolve_member(ctx, target)
         if not member:
             embed.add_field(name=target, value="❌ Not found.", inline=False)
             continue
@@ -1156,7 +1156,7 @@ async def awardpoints(ctx, amount: int, *targets):
     not_found = []
 
     for target in targets:
-        member = resolve_member(ctx, target)
+        member = await resolve_member(ctx, target)
         if member:
             total, monthly = update_points(str(member.id), member.name, amount)
             awarded.append((member.display_name, total, monthly))
