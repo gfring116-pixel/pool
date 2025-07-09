@@ -1007,22 +1007,30 @@ def update_points(user_id, username, points_to_add):
     sheet.append_row([str(user_id), str(username), points_to_add])
     return points_to_add, points_to_add
 
-def resolve_member(ctx, input_str):
+async def resolve_member(ctx, input_str):
     guild = ctx.guild
 
-    if input_str.startswith("<@") and input_str.endswith(">"):
-        try:
+    try:
+        # Mention
+        if input_str.startswith("<@") and input_str.endswith(">"):
             user_id = int(input_str.strip("<@!>"))
-            return guild.get_member(user_id)
-        except ValueError:
-            return None
+            return await guild.fetch_member(user_id)
 
-    if input_str.isdigit():
-        return guild.get_member(int(input_str))
+        # Raw ID
+        if input_str.isdigit():
+            return await guild.fetch_member(int(input_str))
 
-    for member in guild.members:
-        if str(member) == input_str or member.display_name.lower() == input_str.lower():
-            return member
+        # Username or display name
+        for member in guild.members:
+            if str(member) == input_str or member.display_name.lower() == input_str.lower():
+                return member
+
+    except discord.NotFound:
+        return None
+    except Exception as e:
+        print(f"[resolve_member error] {e}")
+        return None
+
     return None
 
 @bot.command()
