@@ -1018,6 +1018,51 @@ async def points(ctx):
     embed.add_field(name="!selfpromote", value="Promote yourself if eligible.", inline=False)
     await ctx.send(embed=embed)
 
+@bot.command()
+async def awardpoints(ctx, amount: int, *members: discord.Member):
+    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
+        return await ctx.send("❌ You do not have permission to use this command.")
+
+    if not members:
+        return await ctx.send("❌ Please mention at least one user.")
+
+    embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
+
+    for member in members:
+        total, monthly = update_points(str(member.id), member.name, amount)
+        embed.add_field(
+            name=member.display_name,
+            value=f"➕ {amount} points added\n📊 Total: **{total}**",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def leaderboard(ctx):
+    try:
+        records = sheet.get_all_records()
+    except Exception as e:
+        return await ctx.send(f"❌ Failed to load data: {e}")
+
+    sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
+    embed = discord.Embed(title="🏆 Leaderboard – Top 10", color=discord.Color.purple())
+
+    for i, user in enumerate(sorted_records[:10], start=1):
+        try:
+            member = ctx.guild.get_member(int(user["User ID"]))
+            display_name = member.display_name if member else user.get("Username", "Unknown")
+        except Exception:
+            display_name = user.get("Username", "Unknown")
+
+        embed.add_field(
+            name=f"{i}. {display_name}",
+            value=f"{user.get('Total Points', 0)} pts",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+    
 
 @bot.command()
 async def mypoints(ctx):
