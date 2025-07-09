@@ -1009,28 +1009,41 @@ def update_points(user_id, username, points_to_add):
 
 async def resolve_member(ctx, input_str):
     guild = ctx.guild
+    print(f"[DEBUG] Resolving input: {input_str}")
 
     try:
         # Mention
         if input_str.startswith("<@") and input_str.endswith(">"):
             user_id = int(input_str.strip("<@!>"))
-            return await guild.fetch_member(user_id)
+            print(f"[DEBUG] Detected mention ID: {user_id}")
+            member = await guild.fetch_member(user_id)
+            print(f"[DEBUG] Fetched member: {member}")
+            return member
 
-        # ID
+        # User ID
         if input_str.isdigit():
-            return await guild.fetch_member(int(input_str))
+            user_id = int(input_str)
+            print(f"[DEBUG] Detected numeric ID: {user_id}")
+            member = await guild.fetch_member(user_id)
+            print(f"[DEBUG] Fetched member: {member}")
+            return member
 
-        # Username or display name
+        # Username / Display name
+        lower_input = input_str.lower()
         for member in guild.members:
-            if str(member) == input_str or member.display_name.lower() == input_str.lower():
+            print(f"[DEBUG] Checking member: {member} / {member.display_name}")
+            if str(member).lower() == lower_input or member.display_name.lower() == lower_input:
+                print(f"[DEBUG] Matched member: {member}")
                 return member
 
     except discord.NotFound:
+        print("[DEBUG] Member not found via fetch_member()")
         return None
     except Exception as e:
         print(f"[resolve_member error] {e}")
         return None
 
+    print("[DEBUG] No match found.")
     return None
 
 @bot.command()
