@@ -914,8 +914,6 @@ async def enlist(ctx, *, member_input=None):
         tb = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
         await ctx.send(f"❌ Debug Error:\n```py\n{tb[-1800:]}```")
 
-# military_points_bot.py (final full version with embeds, prefix, debug logging, and permission handling)
-
 import os
 import json
 import discord
@@ -961,10 +959,10 @@ HOST_ROLES = {
     1279450222287655023
 }
 
-# Rank thresholds and abbreviations
+# Ranks
 RANKS = [
     (0, "Recruit", "RCT", 1207981849528246282),
-    (15, "Soldat", "SLD", 1214438109173907546),
+    (15, "SOLDAT", "SOLDAT", 1214438109173907546),
     (65, "Corporal", "CPL", 1208374047994281985),
     (150, "Junior Sergeant", "JSGT", 1225058657507606600),
     (275, "Sergeant", "SGT", 1207980351826173962),
@@ -973,7 +971,6 @@ RANKS = [
     (700, "Master Sergeant", "MSGT", 1214438714508312596)
 ]
 
-# Helper functions
 def get_regiment(member):
     for role in member.roles:
         if role.id in REGIMENT_ROLES:
@@ -986,6 +983,9 @@ def get_rank(points):
         if points >= rank[0]:
             current_rank = rank
     return current_rank
+
+def extract_roblox_name(display_name):
+    return display_name.split()[-1] if display_name else "Unknown"
 
 def update_points(user_id, username, points_to_add):
     records = sheet.get_all_records()
@@ -1010,23 +1010,25 @@ def update_points(user_id, username, points_to_add):
 @bot.command()
 async def points(ctx):
     embed = discord.Embed(title="📌 Military Points System Commands", color=discord.Color.gold())
-    embed.add_field(name="!awardpoints @user [amount]", value="Give points to a user (Host only).", inline=False)
+    embed.add_field(name="!awardpoints [amount] @user(s)", value="Give points to users (Host only).", inline=False)
     embed.add_field(name="!mypoints", value="See your total and monthly points.", inline=False)
-    embed.add_field(name="!leaderboard", value="View the top 10 soldiers.", inline=False)
-    embed.add_field(name="!pointsneeded", value="See how many more points you need for your next rank.", inline=False)
-    embed.add_field(name="!promote @user", value="Promote someone based on their points (Host only).", inline=False)
+    embed.add_field(name="!pointsneeded", value="Points needed for next rank.", inline=False)
+    embed.add_field(name="!leaderboard", value="Top 10 members by points.", inline=False)
+    embed.add_field(name="!promote @user(s)", value="Promote based on points (Host only).", inline=False)
     embed.add_field(name="!selfpromote", value="Promote yourself if eligible.", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command()
-async def awardpoints(ctx, member: discord.Member, amount: int):
+async def awardpoints(ctx, amount: int, *members: discord.Member):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission to use this command.")
-    total, monthly = update_points(member.id, member.name, amount)
+        return await ctx.send("❌ You do not have permission.")
+    if not members:
+        return await ctx.send("❌ Mention at least one user.")
+
     embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
-    embed.add_field(name="User", value=member.mention, inline=True)
-    embed.add_field(name="Points Given", value=str(amount), inline=True)
-    embed.add_field(name="Total Points", value=str(total), inline=True)
+    for member in members:
+        total, monthly = update_points(member.id, member.name, amount)
+        embed.add_field(name=member.display_name, value=f"+{amount} | Total: {total}", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -1042,8 +1044,7 @@ async def mypoints(ctx):
             embed = discord.Embed(title="📊 Your Points", color=discord.Color.blue())
             embed.add_field(name="Total Points", value=str(total))
             embed.add_field(name="This Month", value=str(monthly))
-            await ctx.send(embed=embed)
-            return
+            return await ctx.send(embed=embed)
     await ctx.send("❌ You don't have any points yet.")
 
 @bot.command()
@@ -1053,13 +1054,11 @@ async def pointsneeded(ctx):
     for row in records:
         if str(row.get("User ID")) == user_id:
             total = int(row["Total Points"])
-            for threshold, name, abbr, role_id in RANKS:
+            for threshold, name, abbr, _ in RANKS:
                 if total < threshold:
-                    embed = discord.Embed(title="📈 Promotion Progress", description=f"You need **{threshold - total}** more points to reach **{name}**.", color=discord.Color.orange())
-                    await ctx.send(embed=embed)
-                    return
-            await ctx.send("🎉 You have reached the highest rank!")
-            return
+                    embed = discord.Embed(title="📈 Promotion Progress", description=f"You need {threshold - total} more points to reach {name}.", color=discord.Color.orange())
+                    return await ctx.send(embed=embed)
+            return await ctx.send("🎉 You have reached the highest rank!")
     await ctx.send("❌ You don't have any points yet.")
 
 @bot.command()
@@ -1074,68 +1073,71 @@ async def leaderboard(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def promote(ctx, member: discord.Member):
-    log_debug(ctx, f"Promoting {member} ({member.id})")
+async def promote(ctx, *members: discord.Member):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        log_debug(ctx, "Permission denied.")
-        return await ctx.send("❌ You do not have permission to use this command.")
-    user_id = str(member.id)
+        return await ctx.send("❌ You do not have permission.")
+    if not members:
+        return await ctx.send("❌ Mention at least one user.")
+
+    embed = discord.Embed(title="📈 Promotion Results", color=discord.Color.green())
     records = sheet.get_all_records()
-    log_debug(ctx, f"Loaded {len(records)} sheet records")
-    for row in records:
-        if str(row.get("User ID")) == user_id:
-            points = int(row["Total Points"])
-            log_debug(ctx, f"Found user in sheet with {points} points")
-            rank = get_rank(points)
-            regiment = get_regiment(member)
-            nickname = f"{regiment} {rank[2]} {member.name}"
-            try:
-                await member.edit(nick=nickname)
-                log_debug(ctx, f"Updated nickname to {nickname}")
-            except discord.Forbidden:
-                return await ctx.send("❌ I can't change this user's nickname. Please move my role above theirs.")
-            for _, _, _, rid in RANKS:
-                role = ctx.guild.get_role(rid)
-                if role in member.roles:
-                    await member.remove_roles(role)
-                    log_debug(ctx, f"Removed old rank role {role.name}")
-            await member.add_roles(ctx.guild.get_role(rank[3]))
-            log_debug(ctx, f"Assigned new role: {rank[1]}")
-            embed = discord.Embed(title="📈 Promotion", description=f"{member.mention} has been promoted to **{rank[1]}**!", color=discord.Color.green())
-            await ctx.send(embed=embed)
-            return
-    log_debug(ctx, f"User {member.name} not found in sheet")
-    await ctx.send("❌ User not found in tracker.")
+
+    for member in members:
+        user_id = str(member.id)
+        for row in records:
+            if str(row.get("User ID")) == user_id:
+                points = int(row["Total Points"])
+                rank = get_rank(points)
+                regiment = get_regiment(member)
+                roblox_name = extract_roblox_name(member.display_name)
+                nickname = f"{{{regiment}}} {rank[1]} {roblox_name}"
+
+                try:
+                    await member.edit(nick=nickname)
+                except discord.Forbidden:
+                    embed.add_field(name=member.display_name, value="❌ Missing permission to edit nickname.", inline=False)
+                    continue
+
+                for _, _, _, rid in RANKS:
+                    role = ctx.guild.get_role(rid)
+                    if role in member.roles:
+                        await member.remove_roles(role)
+                await member.add_roles(ctx.guild.get_role(rank[3]))
+
+                embed.add_field(name=member.display_name, value=f"Promoted to {rank[1]}\nNickname: `{nickname}`", inline=False)
+                break
+        else:
+            embed.add_field(name=member.display_name, value="❌ Not found in points tracker.", inline=False)
+
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def selfpromote(ctx):
     member = ctx.author
     user_id = str(member.id)
     records = sheet.get_all_records()
-    log_debug(ctx, f"Checking self-promotion for {member} ({member.id})")
     for row in records:
         if str(row.get("User ID")) == user_id:
             points = int(row["Total Points"])
-            log_debug(ctx, f"Found user in sheet with {points} points")
             rank = get_rank(points)
             regiment = get_regiment(member)
-            nickname = f"{regiment} {rank[2]} {member.name}"
+            roblox_name = extract_roblox_name(member.display_name)
+            nickname = f"{{{regiment}}} {rank[1]} {roblox_name}"
+
             try:
                 await member.edit(nick=nickname)
-                log_debug(ctx, f"Updated nickname to {nickname}")
             except discord.Forbidden:
-                return await ctx.send("❌ I can't change your nickname. Please ask an admin to adjust my role.")
+                return await ctx.send("❌ I can't change your nickname. Please ask an admin.")
+
             for _, _, _, rid in RANKS:
                 role = ctx.guild.get_role(rid)
                 if role in member.roles:
                     await member.remove_roles(role)
-                    log_debug(ctx, f"Removed old rank role {role.name}")
             await member.add_roles(ctx.guild.get_role(rank[3]))
-            log_debug(ctx, f"Assigned new role: {rank[1]}")
-            embed = discord.Embed(title="📈 Self Promotion", description=f"You have been promoted to **{rank[1]}**!", color=discord.Color.green())
-            await ctx.send(embed=embed)
-            return
-    log_debug(ctx, f"User not found in tracker")
+
+            embed = discord.Embed(title="📈 Self Promotion", description=f"You have been promoted to {rank[1]}!\nNickname: `{nickname}`", color=discord.Color.green())
+            return await ctx.send(embed=embed)
+
     await ctx.send("❌ You don't have any points yet.")
 
 # Run bot
