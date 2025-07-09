@@ -1009,54 +1009,40 @@ def update_points(user_id, username, points_to_add):
 
 async def resolve_member(ctx, input_str):
     guild = ctx.guild
-    print(f"[DEBUG] Resolving input: {input_str}")
+    print(f"[DEBUG] Resolving: {input_str}")
 
     try:
         # Mention
         if input_str.startswith("<@") and input_str.endswith(">"):
             user_id = int(input_str.strip("<@!>"))
-            print(f"[DEBUG] Detected mention ID: {user_id}")
             member = await guild.fetch_member(user_id)
-            print(f"[DEBUG] Fetched member: {member}")
+            print(f"[DEBUG] Resolved via mention → {member}")
             return member
 
-        # User ID
+        # ID
         if input_str.isdigit():
-            user_id = int(input_str)
-            print(f"[DEBUG] Detected numeric ID: {user_id}")
-            member = await guild.fetch_member(user_id)
-            print(f"[DEBUG] Fetched member: {member}")
+            member = await guild.fetch_member(int(input_str))
+            print(f"[DEBUG] Resolved via ID → {member}")
             return member
 
-        # Username / Display name
-        lower_input = input_str.lower()
+        # Username or Display Name
+        input_lower = input_str.lower()
         for member in guild.members:
-            print(f"[DEBUG] Checking member: {member} / {member.display_name}")
-            if str(member).lower() == lower_input or member.display_name.lower() == lower_input:
-                print(f"[DEBUG] Matched member: {member}")
+            if (str(member).lower() == input_lower or
+                member.name.lower() == input_lower or
+                member.display_name.lower() == input_lower):
+                print(f"[DEBUG] Resolved via name → {member}")
                 return member
 
     except discord.NotFound:
-        print("[DEBUG] Member not found via fetch_member()")
+        print(f"[DEBUG] Member not found: {input_str}")
         return None
     except Exception as e:
         print(f"[resolve_member error] {e}")
         return None
 
-    print("[DEBUG] No match found.")
+    print(f"[DEBUG] No match: {input_str}")
     return None
-
-@bot.command()
-async def points(ctx):
-    embed = discord.Embed(title="📌 Military Points System Commands", color=discord.Color.gold())
-    embed.add_field(name="!awardpoints [amount] @user(s)", value="Give points to users (Host only).", inline=False)
-    embed.add_field(name="!mypoints", value="See your total and monthly points.", inline=False)
-    embed.add_field(name="!pointsneeded", value="Points needed for next rank.", inline=False)
-    embed.add_field(name="!leaderboard", value="Top 10 members by points.", inline=False)
-    embed.add_field(name="!promote @user(s)", value="Promote based on points (Host only).", inline=False)
-    embed.add_field(name="!selfpromote", value="Promote yourself if eligible.", inline=False)
-    await ctx.send(embed=embed)
-
 
 @bot.command()
 async def leaderboard(ctx):
@@ -1117,12 +1103,13 @@ async def pointsneeded(ctx):
 @bot.command()
 async def promote(ctx, *targets):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission to use this command.")
+        return await ctx.send("❌ You do not have permission.")
+
     if not targets:
         return await ctx.send("❌ Provide at least one member.")
 
-    embed = discord.Embed(title="📈 Promotion Results", color=discord.Color.green())
     records = sheet.get_all_records()
+    embed = discord.Embed(title="📈 Promotion Results", color=discord.Color.blue())
 
     for target in targets:
         member = await resolve_member(ctx, target)
@@ -1141,17 +1128,14 @@ async def promote(ctx, *targets):
 
                 try:
                     await member.edit(nick=nickname)
+                    for _, _, _, rid in RANKS:
+                        role = ctx.guild.get_role(rid)
+                        if role and role in member.roles:
+                            await member.remove_roles(role)
+                    await member.add_roles(ctx.guild.get_role(rank[3]))
+                    embed.add_field(name=member.display_name, value=f"🎖️ Promoted to **{rank[1]}**", inline=False)
                 except discord.Forbidden:
-                    embed.add_field(name=member.display_name, value="❌ Missing permission to edit nickname.", inline=False)
-                    continue
-
-                for _, _, _, rid in RANKS:
-                    role = ctx.guild.get_role(rid)
-                    if role and role in member.roles:
-                        await member.remove_roles(role)
-                await member.add_roles(ctx.guild.get_role(rank[3]))
-
-                embed.add_field(name=member.display_name, value=f"Promoted to {rank[1]}\nNickname: `{nickname}`", inline=False)
+                    embed.add_field(name=member.display_name, value="❌ Missing permission to change nickname or roles.", inline=False)
                 break
         else:
             embed.add_field(name=member.display_name, value="❌ Not found in tracker.", inline=False)
@@ -1159,31 +1143,22 @@ async def promote(ctx, *targets):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def awardpoints(ctx, amount: int, *targets):
+async def awardpoints(ctx, target: str, amount: int):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission to use this command.")
-    if not targets:
-        return await ctx.send("❌ Please provide at least one member (mention, username, or ID).")
+        return await ctx.send("❌ You do not have permission.")
 
-    awarded = []
-    not_found = []
+    member = await resolve_member(ctx, target)
 
-    for target in targets:
-        member = await resolve_member(ctx, target)
-        if member:
-            total, monthly = update_points(str(member.id), member.name, amount)
-            awarded.append((member.display_name, total, monthly))
-        else:
-            not_found.append(target)
+    if not member:
+        await ctx.send(f"❌ Could not find user: `{target}`")
+        return
+
+    total, monthly = update_points(str(member.id), member.name, amount)
 
     embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
-    for name, total, monthly in awarded:
-        embed.add_field(name=name, value=f"➕ {amount} points\n📊 Total: {total}", inline=False)
-
-    if not_found:
-        embed.add_field(name="⚠️ Not Found", value="\n".join(not_found), inline=False)
-
+    embed.add_field(name=member.display_name, value=f"➕ {amount} points\n📊 Total: {total}", inline=False)
     await ctx.send(embed=embed)
+
 
 @bot.command()
 async def selfpromote(ctx):
