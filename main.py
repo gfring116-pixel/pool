@@ -1065,71 +1065,94 @@ def get_regiment_info(member):
 
     return None  # Officer or unassigned
 
+def extract_roblox_name(nickname: str) -> str:
+    return nickname.split()[-1] if nickname else "Unknown"
+
 @bot.command()
 async def leaderboard(ctx):
     try:
-        records = sheet.get_all_records()
+        data = main_sheet.get_all_values() + special_sheet.get_all_values()
     except Exception as e:
         return await ctx.send(f"❌ Failed to load data: {e}")
 
-    sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
+    # Collect all name-merit pairs under each header
+    results = []
+    header_row = None
+    for idx, row in enumerate(data):
+        if row and row[0].strip().isupper():  # header name
+            header_row = idx
+            continue
+        if header_row is not None and len(row) >= 2 and row[0].strip():
+            try:
+                merit = int(row[1])
+                name = row[0].strip()
+                results.append((name, merit))
+            except:
+                continue
+
+    sorted_records = sorted(results, key=lambda x: x[1], reverse=True)[:10]
     embed = discord.Embed(title="🏆 Leaderboard – Top 10", color=discord.Color.purple())
 
-    for i, user in enumerate(sorted_records[:10], start=1):
-        try:
-            member = ctx.guild.get_member(int(user["User ID"]))
-            display_name = member.display_name if member else user.get("Username", "Unknown")
-        except Exception:
-            display_name = user.get("Username", "Unknown")
-
+    for i, (name, points) in enumerate(sorted_records, start=1):
         embed.add_field(
-            name=f"{i}. {display_name}",
-            value=f"{user.get('Total Points', 0)} pts",
+            name=f"{i}. {name}",
+            value=f"{points} pts",
             inline=False
         )
 
     await ctx.send(embed=embed)
-    
 
 @bot.command()
 async def mypoints(ctx):
-    user_id = str(ctx.author.id)
+    roblox_name = extract_roblox_name(ctx.author.display_name)
     now = datetime.utcnow()
     current_month = now.strftime("%Y-%m")
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row.get("User ID")) == user_id:
-            total = row["Total Points"]
-            monthly = row.get(f"{current_month} Points", 0)
-            embed = discord.Embed(title="📊 Your Points", color=discord.Color.blue())
-            embed.add_field(name="Total Points", value=str(total))
-            embed.add_field(name="This Month", value=str(monthly))
-            return await ctx.send(embed=embed)
-    await ctx.send("❌ You don't have any points yet.")
+
+    found = False
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for row in data:
+            if len(row) >= 2 and row[0].strip().lower() == roblox_name.lower():
+                total = int(row[1])
+                embed = discord.Embed(title="📊 Your Points", color=discord.Color.blue())
+                embed.add_field(name="Roblox Username", value=roblox_name)
+                embed.add_field(name="Total Points", value=str(total))
+                embed.set_footer(text="Note: Monthly breakdown not stored in this sheet.")
+                await ctx.send(embed=embed)
+                found = True
+                break
+        if found:
+            break
+
+    if not found:
+        await ctx.send("❌ You don't have any points yet.")
 
 @bot.command()
 async def pointsneeded(ctx):
-    user_id = str(ctx.author.id)
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row.get("User ID")) == user_id:
-            total = int(row["Total Points"])
-            for threshold, name, abbr, _ in RANKS:
-                if total < threshold:
-                    embed = discord.Embed(title="📈 Promotion Progress", description=f"You need {threshold - total} more points to reach {name}.", color=discord.Color.orange())
-                    return await ctx.send(embed=embed)
-            return await ctx.send("🎉 You have reached the highest rank!")
+    roblox_name = extract_roblox_name(ctx.author.display_name)
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for row in data:
+            if len(row) >= 2 and row[0].strip().lower() == roblox_name.lower():
+                points = int(row[1])
+                for threshold, name, abbr, _ in RANKS:
+                    if points < threshold:
+                        embed = discord.Embed(
+                            title="📈 Promotion Progress",
+                            description=f"You need `{threshold - points}` more points to reach **{name}**.",
+                            color=discord.Color.orange()
+                        )
+                        return await ctx.send(embed=embed)
+                return await ctx.send("🎉 You have reached the highest rank!")
     await ctx.send("❌ You don't have any points yet.")
 
 @bot.command()
 async def promote(ctx, *targets):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
         return await ctx.send("❌ You do not have permission.")
-
     if not targets:
         return await ctx.send("❌ Provide at least one member.")
 
-    records = sheet.get_all_records()
     embed = discord.Embed(title="📈 Promotion Results", color=discord.Color.blue())
 
     for target in targets:
@@ -1138,146 +1161,78 @@ async def promote(ctx, *targets):
             embed.add_field(name=target, value="❌ Not found.", inline=False)
             continue
 
-        user_id = str(member.id)
-        for row in records:
-            if str(row.get("User ID")) == user_id:
-                points = int(row["Total Points"])
-                rank = get_rank(points)
-                regiment = get_regiment(member)
-                roblox_name = extract_roblox_name(member.display_name)
-                nickname = f"{{{regiment}}} {rank[1]} {roblox_name}"
-
-                try:
-                    await member.edit(nick=nickname)
-                    for _, _, _, rid in RANKS:
-                        role = ctx.guild.get_role(rid)
-                        if role and role in member.roles:
-                            await member.remove_roles(role)
-                    await member.add_roles(ctx.guild.get_role(rank[3]))
-                    embed.add_field(name=member.display_name, value=f"🎖️ Promoted to **{rank[1]}**", inline=False)
-                except discord.Forbidden:
-                    embed.add_field(name=member.display_name, value="❌ Missing permission to change nickname or roles.", inline=False)
+        roblox_name = extract_roblox_name(member.display_name)
+        total = None
+        for sheet in [main_sheet, special_sheet]:
+            data = sheet.get_all_values()
+            for row in data:
+                if len(row) >= 2 and row[0].strip().lower() == roblox_name.lower():
+                    total = int(row[1])
+                    break
+            if total is not None:
                 break
-        else:
-            embed.add_field(name=member.display_name, value="❌ Not found in tracker.", inline=False)
 
-    await ctx.send(embed=embed)
+        if total is None:
+            embed.add_field(name=roblox_name, value="❌ Not found in tracker.", inline=False)
+            continue
 
-@bot.command()
-async def awardpoints(ctx, user_input: str, amount: int):
-    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission.")
+        rank = get_rank(total)
+        regiment = get_regiment(member)
+        nickname = roblox_name  # Only use Roblox username
 
-    if amount <= 0:
-        return await ctx.send("❌ Amount must be a positive number.")
-
-    # Resolve member
-    member = None
-    if user_input.startswith("<@") and user_input.endswith(">"):
         try:
-            member = ctx.guild.get_member(int(user_input.strip("<@!>")))
-        except:
-            pass
-    elif user_input.isdigit():
-        member = ctx.guild.get_member(int(user_input))
-    else:
-        for m in ctx.guild.members:
-            if m.name.lower() == user_input.lower() or m.display_name.lower() == user_input.lower():
-                member = m
-                break
+            await member.edit(nick=nickname)
+            # Remove old ranks
+            for _, _, _, rid in RANKS:
+                role = ctx.guild.get_role(rid)
+                if role and role in member.roles:
+                    await member.remove_roles(role)
+            # Add new rank
+            await member.add_roles(ctx.guild.get_role(rank[3]))
+            embed.add_field(name=nickname, value=f"🎖️ Promoted to **{rank[1]}**", inline=False)
+        except discord.Forbidden:
+            embed.add_field(name=nickname, value="❌ Missing permission to update nickname or roles.", inline=False)
 
-    if not member:
-        return await ctx.send(f"❌ User `{user_input}` not found.")
-
-    # ✅ Get Roblox username = last part of nickname
-    if not member.display_name:
-        return await ctx.send("❌ Member has no nickname set.")
-
-    roblox_username = member.display_name.split()[-1].strip()
-
-    # ✅ Get regiment info
-    info = get_regiment_info(member)
-    if not info:
-        return await ctx.send("❌ Could not determine regiment or unsupported regiment.")
-
-    sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
-    sheet_data = sheet.get_all_values()
-    header = info["header"]
-
-    # ✅ Find section header
-    header_row = None
-    for idx, row in enumerate(sheet_data):
-        if row[0].strip().upper() == header.upper():
-            header_row = idx
-            break
-
-    if header_row is None:
-        return await ctx.send(f"❌ Header `{header}` not found in the sheet.")
-
-    # ✅ Search under the header for Roblox username
-    name_row = None
-    search_row = header_row + 2
-    while search_row < len(sheet_data):
-        row = sheet_data[search_row]
-        if not row[0].strip():  # End of block
-            break
-        if row[0].strip().lower() == roblox_username.lower():
-            name_row = search_row
-            break
-        search_row += 1
-
-    # ✅ Update or insert
-    if name_row is not None:
-        current = int(sheet_data[name_row][1])
-        total = current + amount
-        sheet.update_cell(name_row + 1, 2, total)
-        sheet.update_note(name_row + 1, 1, f"Discord ID: {member.id}")
-    else:
-        insert_row = search_row + 1
-        sheet.insert_row([roblox_username, amount], insert_row)
-        sheet.update_note(insert_row, 1, f"Discord ID: {member.id}")
-        total = amount
-
-    embed = discord.Embed(
-        title="✅ Merit Awarded",
-        description=(
-            f"👤 **{roblox_username}**\n"
-            f"🎖️ **Regiment:** {info['header']}\n"
-            f"➕ **Awarded:** {amount} points\n"
-            f"📊 **Total:** {total}"
-        ),
-        color=discord.Color.green()
-    )
     await ctx.send(embed=embed)
 
 @bot.command()
 async def selfpromote(ctx):
     member = ctx.author
-    user_id = str(member.id)
-    records = sheet.get_all_records()
-    for row in records:
-        if str(row.get("User ID")) == user_id:
-            points = int(row["Total Points"])
-            rank = get_rank(points)
-            regiment = get_regiment(member)
-            roblox_name = extract_roblox_name(member.display_name)
-            nickname = f"{{{regiment}}} {rank[1]} {roblox_name}"
+    roblox_name = extract_roblox_name(member.display_name)
+    total = None
 
-            try:
-                await member.edit(nick=nickname)
-            except discord.Forbidden:
-                return await ctx.send("❌ I can't change your nickname. Please ask an admin.")
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for row in data:
+            if len(row) >= 2 and row[0].strip().lower() == roblox_name.lower():
+                total = int(row[1])
+                break
+        if total is not None:
+            break
 
-            for _, _, _, rid in RANKS:
-                role = ctx.guild.get_role(rid)
-                if role in member.roles:
-                    await member.remove_roles(role)
-            await member.add_roles(ctx.guild.get_role(rank[3]))
+    if total is None:
+        return await ctx.send("❌ You don't have any points yet.")
 
-            embed = discord.Embed(title="📈 Self Promotion", description=f"You have been promoted to {rank[1]}!\nNickname: `{nickname}`", color=discord.Color.green())
-            return await ctx.send(embed=embed)
+    rank = get_rank(total)
+    nickname = roblox_name  # no rank prefix
 
-    await ctx.send("❌ You don't have any points yet.")
+    try:
+        await member.edit(nick=nickname)
+    except discord.Forbidden:
+        return await ctx.send("❌ I can't change your nickname. Please ask an admin.")
+
+    for _, _, _, rid in RANKS:
+        role = ctx.guild.get_role(rid)
+        if role and role in member.roles:
+            await member.remove_roles(role)
+    await member.add_roles(ctx.guild.get_role(rank[3]))
+
+    embed = discord.Embed(
+        title="📈 Self Promotion",
+        description=f"You have been promoted to **{rank[1]}**!\nNew nickname: `{nickname}`",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed)
 
 # ========== BEGIN ENLIST SYSTEM MERGE ==========
 
