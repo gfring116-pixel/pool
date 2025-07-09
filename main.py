@@ -1007,6 +1007,24 @@ def update_points(user_id, username, points_to_add):
     sheet.append_row([str(user_id), str(username), points_to_add])
     return points_to_add, points_to_add
 
+def resolve_member(ctx, input_str):
+    guild = ctx.guild
+
+    if input_str.startswith("<@") and input_str.endswith(">"):
+        try:
+            user_id = int(input_str.strip("<@!>"))
+            return guild.get_member(user_id)
+        except ValueError:
+            return None
+
+    if input_str.isdigit():
+        return guild.get_member(int(input_str))
+
+    for member in guild.members:
+        if str(member) == input_str or member.display_name.lower() == input_str.lower():
+            return member
+    return None
+
 @bot.command()
 async def points(ctx):
     embed = discord.Embed(title="📌 Military Points System Commands", color=discord.Color.gold())
@@ -1018,25 +1036,6 @@ async def points(ctx):
     embed.add_field(name="!selfpromote", value="Promote yourself if eligible.", inline=False)
     await ctx.send(embed=embed)
 
-@bot.command()
-async def awardpoints(ctx, amount: int, *members: discord.Member):
-    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission to use this command.")
-
-    if not members:
-        return await ctx.send("❌ Please mention at least one user.")
-
-    embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
-
-    for member in members:
-        total, monthly = update_points(str(member.id), member.name, amount)
-        embed.add_field(
-            name=member.display_name,
-            value=f"➕ {amount} points added\n📊 Total: **{total}**",
-            inline=False
-        )
-
-    await ctx.send(embed=embed)
 
 @bot.command()
 async def leaderboard(ctx):
@@ -1095,16 +1094,21 @@ async def pointsneeded(ctx):
     await ctx.send("❌ You don't have any points yet.")
 
 @bot.command()
-async def promote(ctx, *members: discord.Member):
+async def promote(ctx, *targets):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission.")
-    if not members:
-        return await ctx.send("❌ Mention at least one user.")
+        return await ctx.send("❌ You do not have permission to use this command.")
+    if not targets:
+        return await ctx.send("❌ Provide at least one member.")
 
     embed = discord.Embed(title="📈 Promotion Results", color=discord.Color.green())
     records = sheet.get_all_records()
 
-    for member in members:
+    for target in targets:
+        member = resolve_member(ctx, target)
+        if not member:
+            embed.add_field(name=target, value="❌ Not found.", inline=False)
+            continue
+
         user_id = str(member.id)
         for row in records:
             if str(row.get("User ID")) == user_id:
@@ -1122,14 +1126,41 @@ async def promote(ctx, *members: discord.Member):
 
                 for _, _, _, rid in RANKS:
                     role = ctx.guild.get_role(rid)
-                    if role in member.roles:
+                    if role and role in member.roles:
                         await member.remove_roles(role)
                 await member.add_roles(ctx.guild.get_role(rank[3]))
 
                 embed.add_field(name=member.display_name, value=f"Promoted to {rank[1]}\nNickname: `{nickname}`", inline=False)
                 break
         else:
-            embed.add_field(name=member.display_name, value="❌ Not found in points tracker.", inline=False)
+            embed.add_field(name=member.display_name, value="❌ Not found in tracker.", inline=False)
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def awardpoints(ctx, amount: int, *targets):
+    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
+        return await ctx.send("❌ You do not have permission to use this command.")
+    if not targets:
+        return await ctx.send("❌ Please provide at least one member (mention, username, or ID).")
+
+    awarded = []
+    not_found = []
+
+    for target in targets:
+        member = resolve_member(ctx, target)
+        if member:
+            total, monthly = update_points(str(member.id), member.name, amount)
+            awarded.append((member.display_name, total, monthly))
+        else:
+            not_found.append(target)
+
+    embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
+    for name, total, monthly in awarded:
+        embed.add_field(name=name, value=f"➕ {amount} points\n📊 Total: {total}", inline=False)
+
+    if not_found:
+        embed.add_field(name="⚠️ Not Found", value="\n".join(not_found), inline=False)
 
     await ctx.send(embed=embed)
 
