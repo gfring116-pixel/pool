@@ -1018,18 +1018,6 @@ async def points(ctx):
     embed.add_field(name="!selfpromote", value="Promote yourself if eligible.", inline=False)
     await ctx.send(embed=embed)
 
-@bot.command()
-async def awardpoints(ctx, amount: int, *members: discord.Member):
-    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("❌ You do not have permission.")
-    if not members:
-        return await ctx.send("❌ Mention at least one user.")
-
-    embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
-    for member in members:
-        total, monthly = update_points(member.id, member.name, amount)
-        embed.add_field(name=member.display_name, value=f"+{amount} | Total: {total}", inline=False)
-    await ctx.send(embed=embed)
 
 @bot.command()
 async def mypoints(ctx):
@@ -1060,17 +1048,6 @@ async def pointsneeded(ctx):
                     return await ctx.send(embed=embed)
             return await ctx.send("🎉 You have reached the highest rank!")
     await ctx.send("❌ You don't have any points yet.")
-
-@bot.command()
-async def leaderboard(ctx):
-    records = sheet.get_all_records()
-    sorted_records = sorted(records, key=lambda x: int(x.get("Total Points", 0)), reverse=True)
-    embed = discord.Embed(title="🏆 Leaderboard – Top 10", color=discord.Color.purple())
-    for i, user in enumerate(sorted_records[:10], start=1):
-        member = ctx.guild.get_member(int(user["User ID"]))
-        name = member.display_name if member else user['Username']
-        embed.add_field(name=f"{i}. {name}", value=f"{user['Total Points']} pts", inline=False)
-    await ctx.send(embed=embed)
 
 @bot.command()
 async def promote(ctx, *members: discord.Member):
