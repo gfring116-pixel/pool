@@ -1143,22 +1143,38 @@ async def promote(ctx, *targets):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def awardpoints(ctx, target: str, amount: int):
+async def awardpoints(ctx, *args):
     if not any(role.id in HOST_ROLES for role in ctx.author.roles):
         return await ctx.send("❌ You do not have permission.")
 
-    member = await resolve_member(ctx, target)
+    if len(args) < 2:
+        return await ctx.send("❌ Usage: `!awardpoints [user1] [user2] ... [amount]`")
 
-    if not member:
-        await ctx.send(f"❌ Could not find user: `{target}`")
-        return
+    try:
+        amount = int(args[-1])
+    except ValueError:
+        return await ctx.send("❌ The last argument must be the number of points to award.")
 
-    total, monthly = update_points(str(member.id), member.name, amount)
+    targets = args[:-1]
+    awarded = []
+    not_found = []
+
+    for target in targets:
+        member = await resolve_member(ctx, target)
+        if member:
+            total, monthly = update_points(str(member.id), member.name, amount)
+            awarded.append((member.display_name, total))
+        else:
+            not_found.append(target)
 
     embed = discord.Embed(title="✅ Points Awarded", color=discord.Color.green())
-    embed.add_field(name=member.display_name, value=f"➕ {amount} points\n📊 Total: {total}", inline=False)
-    await ctx.send(embed=embed)
+    for name, total in awarded:
+        embed.add_field(name=name, value=f"➕ {amount} points\n📊 Total: {total}", inline=False)
 
+    if not_found:
+        embed.add_field(name="⚠️ Not Found", value="\n".join(not_found), inline=False)
+
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def selfpromote(ctx):
@@ -1278,7 +1294,7 @@ class ConfirmView(discord.ui.View):
                 await self.member.remove_roles(r)
 
         await self.member.add_roles(role)
-        nickname = f"{regiment_info['prefix']} ({self.roblox_username})"
+        nickname = f"{regiment_info['prefix']} {self.roblox_username}"
         if len(nickname) > 32:
             nickname = nickname[:32]
         try:
