@@ -1681,23 +1681,28 @@ class PermissionView(discord.ui.View):
         self.add_item(discord.ui.Button(label="✍️ Custom Perms", style=discord.ButtonStyle.primary, custom_id="custom", row=3))
 
     def make_toggle(self, perm_name):
-        async def callback(interaction: discord.Interaction):
-            if interaction.user.id != self.author_id:
-                return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
+    async def callback(interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
 
-            current_perms = self.role.permissions or discord.Permissions.none()
-            current_value = getattr(current_perms, perm_name, False)
-            updated_perms = current_perms.update(**{perm_name: not current_value})
+        current_perms = self.role.permissions or discord.Permissions.none()
+        current_value = getattr(current_perms, perm_name, False)
 
-            try:
-                await self.role.edit(permissions=updated_perms)
-                self.refresh_buttons()
-                await interaction.response.edit_message(view=self)
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Failed to update permission: {e}", ephemeral=True)
+        # Create a new copy and toggle the target permission
+        new_perms = discord.Permissions()
+        for perm, value in current_perms:
+            setattr(new_perms, perm, value)
+        setattr(new_perms, perm_name, not current_value)
 
-        return callback
+        try:
+            await self.role.edit(permissions=new_perms)
+            self.refresh_buttons()
+            await interaction.response.edit_message(view=self)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Failed to update permission: {e}", ephemeral=True)
 
+    return callback
+    
     @discord.ui.button(label="⚙️ Hidden Handler", style=discord.ButtonStyle.secondary, disabled=True)
     async def handler(self, interaction: discord.Interaction, button: discord.ui.Button):
         pass  # hidden placeholder to suppress empty UI warnings
