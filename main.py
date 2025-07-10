@@ -1680,15 +1680,15 @@ class PermissionView(discord.ui.View):
         self.add_item(discord.ui.Button(label="🧾 Preview", style=discord.ButtonStyle.secondary, custom_id="preview", row=3))
         self.add_item(discord.ui.Button(label="✍️ Custom Perms", style=discord.ButtonStyle.primary, custom_id="custom", row=3))
 
-    def make_toggle(self, perm_name):
-        async def callback(interaction: discord.Interaction):
-            if interaction.user.id != self.author_id:
-                return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
+def make_toggle(self, perm_name):
+    async def callback(interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
 
         current_perms = self.role.permissions or discord.Permissions.none()
         current_value = getattr(current_perms, perm_name, False)
 
-        # Create a new copy and toggle the target permission
+        # ✅ Build a copy of permissions safely
         new_perms = discord.Permissions()
         for perm, value in current_perms:
             setattr(new_perms, perm, value)
