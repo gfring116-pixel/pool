@@ -1630,9 +1630,13 @@ class RoleEditView(discord.ui.View):
 
 class PermissionView(discord.ui.View):
     def __init__(self, author_id, role):
-        super().__init__(timeout=120)
+        super().__init__(timeout=300)
         self.author_id = author_id
         self.role = role
+        self.refresh_buttons()
+
+    def refresh_buttons(self):
+        self.clear_items()
         perms = [
             ("Admin", "administrator"),
             ("Manage Server", "manage_guild"),
@@ -1643,25 +1647,35 @@ class PermissionView(discord.ui.View):
             ("Mention Everyone", "mention_everyone"),
             ("Send Messages", "send_messages"),
             ("Read Messages", "read_messages"),
-            ("Attach Files", "attach_files"),
+            ("Attach Files", "attach_files")
         ]
 
-        current = role.permissions
+        current = self.role.permissions
 
         for label, attr in perms:
-            enabled = getattr(current, attr, False)
-            style = discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
-            button = discord.ui.Button(label=f"{label}: {'✅' if enabled else '❌'}", style=style, custom_id=attr)
+            value = getattr(current, attr, False)
+            style = discord.ButtonStyle.success if value else discord.ButtonStyle.secondary
+            button = discord.ui.Button(label=f"{label}: {'✅' if value else '❌'}", style=style, custom_id=attr)
             button.callback = self.make_toggle(attr)
             self.add_item(button)
 
     def make_toggle(self, perm_name):
-        async def callback(interaction):
-            perms = self.role.permissions
-            current_value = getattr(perms, perm_name, False)
-            updated = perms.update(**{perm_name: not current_value})
-            await self.role.edit(permissions=updated)
-            await interaction.response.send_message(f"🔁 Toggled `{perm_name}` to `{not current_value}`", ephemeral=True)
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.author_id:
+                return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
+
+            current_perms = self.role.permissions
+            current_value = getattr(current_perms, perm_name, False)
+
+            updated_perms = current_perms.update(**{perm_name: not current_value})
+
+            try:
+                await self.role.edit(permissions=updated_perms)
+                self.refresh_buttons()
+                await interaction.response.edit_message(view=self)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Failed to update permission: {e}", ephemeral=True)
+
         return callback
 
 class RoleNameModal(discord.ui.Modal, title="📝 Change Role Name"):
