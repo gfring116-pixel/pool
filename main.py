@@ -1628,6 +1628,19 @@ class RoleEditView(discord.ui.View):
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+
+
+class RoleNameModal(discord.ui.Modal, title="📝 Change Role Name"):
+    def __init__(self, role):
+        self.role = role
+        super().__init__()
+        self.name = discord.ui.TextInput(label="New Name", placeholder="Enter role name", max_length=100)
+        self.add_item(self.name)
+
+    async def on_submit(self, interaction):
+        await self.role.edit(name=self.name.value)
+        await interaction.response.send_message(f"✅ Role renamed to `{self.name.value}`", ephemeral=True)
+
 class PermissionView(discord.ui.View):
     def __init__(self, author_id, role):
         super().__init__(timeout=300)
@@ -1637,7 +1650,7 @@ class PermissionView(discord.ui.View):
 
     def refresh_buttons(self):
         self.clear_items()
-        perms = [
+        self.perms_to_toggle = [
             ("Admin", "administrator"),
             ("Manage Server", "manage_guild"),
             ("Manage Roles", "manage_roles"),
@@ -1650,23 +1663,30 @@ class PermissionView(discord.ui.View):
             ("Attach Files", "attach_files")
         ]
 
-        current = self.role.permissions
+        current = self.role.permissions or discord.Permissions.none()
 
-        for label, attr in perms:
-            value = getattr(current, attr, False)
+        for label, attr in self.perms_to_toggle:
+            try:
+                value = getattr(current, attr, False)
+            except:
+                value = False
             style = discord.ButtonStyle.success if value else discord.ButtonStyle.secondary
             button = discord.ui.Button(label=f"{label}: {'✅' if value else '❌'}", style=style, custom_id=attr)
             button.callback = self.make_toggle(attr)
             self.add_item(button)
+
+        # Add extra control buttons
+        self.add_item(discord.ui.Button(label="🔁 Reset All", style=discord.ButtonStyle.danger, custom_id="reset_all", row=3))
+        self.add_item(discord.ui.Button(label="🧾 Preview", style=discord.ButtonStyle.secondary, custom_id="preview", row=3))
+        self.add_item(discord.ui.Button(label="✍️ Custom Perms", style=discord.ButtonStyle.primary, custom_id="custom", row=3))
 
     def make_toggle(self, perm_name):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.author_id:
                 return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
 
-            current_perms = self.role.permissions
+            current_perms = self.role.permissions or discord.Permissions.none()
             current_value = getattr(current_perms, perm_name, False)
-
             updated_perms = current_perms.update(**{perm_name: not current_value})
 
             try:
@@ -1678,16 +1698,69 @@ class PermissionView(discord.ui.View):
 
         return callback
 
-class RoleNameModal(discord.ui.Modal, title="📝 Change Role Name"):
-    def __init__(self, role):
-        self.role = role
-        super().__init__()
-        self.name = discord.ui.TextInput(label="New Name", placeholder="Enter role name", max_length=100)
-        self.add_item(self.name)
+    @discord.ui.button(label="⚙️ Hidden Handler", style=discord.ButtonStyle.secondary, disabled=True)
+    async def handler(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass  # hidden placeholder to suppress empty UI warnings
 
-    async def on_submit(self, interaction):
-        await self.role.edit(name=self.name.value)
-        await interaction.response.send_message(f"✅ Role renamed to `{self.name.value}`", ephemeral=True)
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.author_id
+
+    async def on_timeout(self):
+        pass
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ This editor is not for you.", ephemeral=True)
+            return False
+        return True
+
+    async def on_error(self, error: Exception, item, interaction: discord.Interaction):
+        await interaction.response.send_message(f"❌ Unexpected error: {error}", ephemeral=True)
+
+    async def on_button_click(self, interaction: discord.Interaction):
+        custom_id = interaction.data.get("custom_id")
+
+        if custom_id == "reset_all":
+            try:
+                await self.role.edit(permissions=discord.Permissions.none())
+                self.refresh_buttons()
+                await interaction.response.edit_message(view=self)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Failed to reset: {e}", ephemeral=True)
+
+        elif custom_id == "preview":
+            perms = self.role.permissions or discord.Permissions.none()
+            embed = discord.Embed(title=f"🔎 Permissions for `{self.role.name}`", color=self.role.color)
+            enabled = [name for name, attr in self.perms_to_toggle if getattr(perms, attr, False)]
+            embed.description = "\n".join(f"✅ {name}" for name in enabled) or "*None enabled*"
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        elif custom_id == "custom":
+            await interaction.response.send_modal(CustomPermModal(self.role, self))
+
+class CustomPermModal(discord.ui.Modal, title="✍️ Set Custom Permissions"):
+    def __init__(self, role, view):
+        super().__init__()
+        self.role = role
+        self.view = view
+        self.perms_input = discord.ui.TextInput(
+            label="Permissions (comma-separated)",
+            placeholder="Example: send_messages, kick_members, ban_members",
+            required=True,
+            max_length=200
+        )
+        self.add_item(self.perms_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        perms = self.perms_input.value.lower().replace(" ", "").split(",")
+        valid = {p: True for p in perms}
+        try:
+            updated = discord.Permissions(**valid)
+            await self.role.edit(permissions=updated)
+            self.view.refresh_buttons()
+            await interaction.response.edit_message(view=self.view)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Invalid permissions: {e}", ephemeral=True)
 
 class RoleColorModal(discord.ui.Modal, title="🎨 Change Role Color"):
     def __init__(self, role):
