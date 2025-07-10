@@ -1265,7 +1265,7 @@ async def promote(ctx, *targets):
 
         rank = get_rank(total)
         regiment = get_regiment(member)
-        nickname = roblox_name  # Only use Roblox username
+        nickname = f"{{{regiment}}} {rank[1]} {roblox_name}"  # Only use Roblox username
 
         try:
             await member.edit(nick=nickname)
@@ -1301,7 +1301,7 @@ async def selfpromote(ctx):
         return await ctx.send("❌ You don't have any points yet.")
 
     rank = get_rank(total)
-    nickname = roblox_name  # no rank prefix
+    nickname = f"{{{regiment}}} {rank[1]} {roblox_name}"  # no rank prefix
 
     try:
         await member.edit(nick=nickname)
