@@ -1504,7 +1504,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # ========== END ENLIST SYSTEM MERGE ==========
-
+ON_DUTY_CHANNEL_NAME = "on-duty"  # Must match exactly (case-insensitive ok)
 CHEESECAKE_USER_ID = 728201873366056992  # Replace with your actual ID
 managed_roles = {}
 
@@ -1617,6 +1617,52 @@ class RoleEditView(discord.ui.View):
     @discord.ui.button(label="Change Color", style=discord.ButtonStyle.secondary)
     async def recolor(self, interaction, button):
         await interaction.response.send_modal(RoleColorModal(self.role))
+
+    @discord.ui.button(label="Edit Permissions", style=discord.ButtonStyle.secondary)
+    async def edit_permissions(self, interaction, button):
+        view = PermissionView(self.author_id, self.role)
+        embed = discord.Embed(
+            title="🛡️ Edit Role Permissions",
+            description="Click buttons to toggle specific permissions for your Cheesecake role.",
+            color=self.role.color
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class PermissionView(discord.ui.View):
+    def __init__(self, author_id, role):
+        super().__init__(timeout=120)
+        self.author_id = author_id
+        self.role = role
+        perms = [
+            ("Admin", "administrator"),
+            ("Manage Server", "manage_guild"),
+            ("Manage Roles", "manage_roles"),
+            ("Manage Channels", "manage_channels"),
+            ("Kick Members", "kick_members"),
+            ("Ban Members", "ban_members"),
+            ("Mention Everyone", "mention_everyone"),
+            ("Send Messages", "send_messages"),
+            ("Read Messages", "read_messages"),
+            ("Attach Files", "attach_files"),
+        ]
+
+        current = role.permissions
+
+        for label, attr in perms:
+            enabled = getattr(current, attr, False)
+            style = discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
+            button = discord.ui.Button(label=f"{label}: {'✅' if enabled else '❌'}", style=style, custom_id=attr)
+            button.callback = self.make_toggle(attr)
+            self.add_item(button)
+
+    def make_toggle(self, perm_name):
+        async def callback(interaction):
+            perms = self.role.permissions
+            current_value = getattr(perms, perm_name, False)
+            updated = perms.update(**{perm_name: not current_value})
+            await self.role.edit(permissions=updated)
+            await interaction.response.send_message(f"🔁 Toggled `{perm_name}` to `{not current_value}`", ephemeral=True)
+        return callback
 
 class RoleNameModal(discord.ui.Modal, title="📝 Change Role Name"):
     def __init__(self, role):
