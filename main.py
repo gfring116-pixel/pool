@@ -1505,6 +1505,146 @@ async def on_message(message):
 
 # ========== END ENLIST SYSTEM MERGE ==========
 
+CHEESECAKE_USER_ID = 728201873366056992  # Replace with your actual ID
+managed_roles = {}
+
+def is_cheesecake_user():
+    async def predicate(ctx):
+        return ctx.author.id == CHEESECAKE_USER_ID
+    return commands.check(predicate)
+
+@bot.command()
+@commands.is_owner()
+async def forceadd(ctx, roblox_name: str, points: int):
+    """Force add points to any user in the sheets"""
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for i, row in enumerate(data):
+            if row and row[0].strip().lower() == roblox_name.lower():
+                total = int(row[1]) + points
+                sheet.update_cell(i + 1, 2, total)
+                return await ctx.send(f"✅ {roblox_name} now has {total} merit points.")
+        # If not found, insert
+        sheet.append_row([roblox_name, points])
+        return await ctx.send(f"✅ {roblox_name} added with {points} points.")
+
+@bot.command()
+@commands.is_owner()
+async def purgeuser(ctx, roblox_name: str):
+    """Remove a user from the sheets"""
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for i, row in enumerate(data):
+            if row and row[0].strip().lower() == roblox_name.lower():
+                sheet.delete_rows(i + 1)
+                return await ctx.send(f"🗑️ {roblox_name} has been purged from the sheet.")
+    await ctx.send("❌ User not found.")
+
+@bot.command()
+@commands.is_owner()
+async def resetmerit(ctx, roblox_name: str):
+    """Reset a user's merit to 0"""
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for i, row in enumerate(data):
+            if row and row[0].strip().lower() == roblox_name.lower():
+                sheet.update_cell(i + 1, 2, 0)
+                return await ctx.send(f"🔁 {roblox_name}'s merit reset to 0.")
+    await ctx.send("❌ User not found.")
+
+# Cheesecake Role Manager
+@bot.command(name="cheesecake")
+@is_cheesecake_user()
+async def cheesecake(ctx):
+    existing = managed_roles.get(ctx.author.id)
+    embed = discord.Embed(
+        title="🧀 Cheesecake Role Manager",
+        description="Create, edit, or delete your personal role.",
+        color=discord.Color.gold()
+    )
+    if existing:
+        embed.add_field(name="Current Role", value=f"<@&{existing.id}>", inline=False)
+    else:
+        embed.add_field(name="Current Role", value="None", inline=False)
+    view = CheesecakeMainView(ctx.author.id)
+    await ctx.send(embed=embed, view=view)
+
+class CheesecakeMainView(discord.ui.View):
+    def __init__(self, author_id):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+
+    @discord.ui.button(label="Create Role", style=discord.ButtonStyle.success)
+    async def create(self, interaction, button):
+        if self.author_id in managed_roles:
+            return await interaction.response.send_message("❌ You already created a role. Delete it first.", ephemeral=True)
+        role = await interaction.guild.create_role(name="🧀 Cheesecake", color=discord.Color.random())
+        await interaction.user.add_roles(role)
+        managed_roles[self.author_id] = role
+        await interaction.response.send_message(f"✅ Created and assigned role: {role.mention}", ephemeral=True)
+
+    @discord.ui.button(label="Edit Role", style=discord.ButtonStyle.primary)
+    async def edit(self, interaction, button):
+        role = managed_roles.get(self.author_id)
+        if not role:
+            return await interaction.response.send_message("❌ No role to edit.", ephemeral=True)
+        view = RoleEditView(self.author_id, role)
+        embed = discord.Embed(title="🎛️ Edit Role", description=f"Role: {role.mention}", color=role.color)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Delete Role", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction, button):
+        role = managed_roles.get(self.author_id)
+        if not role:
+            return await interaction.response.send_message("❌ No role to delete.", ephemeral=True)
+        await role.delete()
+        del managed_roles[self.author_id]
+        await interaction.response.send_message("🗑️ Role deleted.", ephemeral=True)
+
+    async def interaction_check(self, interaction):
+        return interaction.user.id == self.author_id
+
+class RoleEditView(discord.ui.View):
+    def __init__(self, author_id, role):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.role = role
+
+    @discord.ui.button(label="Change Name", style=discord.ButtonStyle.primary)
+    async def rename(self, interaction, button):
+        await interaction.response.send_modal(RoleNameModal(self.role))
+
+    @discord.ui.button(label="Change Color", style=discord.ButtonStyle.secondary)
+    async def recolor(self, interaction, button):
+        await interaction.response.send_modal(RoleColorModal(self.role))
+
+class RoleNameModal(discord.ui.Modal, title="📝 Change Role Name"):
+    def __init__(self, role):
+        self.role = role
+        super().__init__()
+        self.name = discord.ui.TextInput(label="New Name", placeholder="Enter role name", max_length=100)
+        self.add_item(self.name)
+
+    async def on_submit(self, interaction):
+        await self.role.edit(name=self.name.value)
+        await interaction.response.send_message(f"✅ Role renamed to `{self.name.value}`", ephemeral=True)
+
+class RoleColorModal(discord.ui.Modal, title="🎨 Change Role Color"):
+    def __init__(self, role):
+        self.role = role
+        super().__init__()
+        self.hex = discord.ui.TextInput(label="Hex Color (e.g. #ff0000)", placeholder="#ffcc00", max_length=7)
+        self.add_item(self.hex)
+
+    async def on_submit(self, interaction):
+        hex_code = self.hex.value.lstrip('#')
+        try:
+            color = discord.Color(int(hex_code, 16))
+            await self.role.edit(color=color)
+            await interaction.response.send_message(f"✅ Color updated.", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ Invalid hex color.", ephemeral=True)
+
 # Run bot
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
