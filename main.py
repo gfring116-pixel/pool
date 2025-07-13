@@ -1558,6 +1558,14 @@ BOT_OWNER_ID = 728201873366056992
 # Dictionary to store special roles for each guild
 special_roles = {}
 
+    await interaction.user.add_roles(new_role)
+    role_message = f"made role: **{new_role.name}** (ID: {new_role.id}) and gave it to you"
+except discord.Forbidden:
+    role_message = f"made role: **{new_role.name}** (ID: {new_role.id}) but couldn't give it to you (missing perms)"
+except Exception as e:
+    role_message = f"made role: **{new_role.name}** (ID: {new_role.id}) but failed to give it to you: {str(e)}"
+        
+
 class RoleView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=300)  # 5 minute timeout
