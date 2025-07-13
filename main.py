@@ -1659,7 +1659,14 @@ class CreateRoleModal(discord.ui.Modal, title='Create Role'):
             # Store the role ID
             special_roles[guild.id] = new_role.id
             
-            await interaction.response.send_message(f"made role: **{new_role.name}** (ID: {new_role.id})", ephemeral=True)
+            # Automatically give the role to the user who created it
+            try:
+                await interaction.user.add_roles(new_role)
+                await interaction.response.send_message(f"made role: **{new_role.name}** (ID: {new_role.id}) and gave it to you", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message(f"made role: **{new_role.name}** (ID: {new_role.id}) but couldn't give it to you (missing perms)", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"made role: **{new_role.name}** (ID: {new_role.id}) but failed to give it to you: {str(e)}", ephemeral=True)
             
         except discord.Forbidden:
             await interaction.response.send_message("can't create roles, missing perms", ephemeral=True)
@@ -1801,10 +1808,18 @@ async def cheesecake_slash(interaction: discord.Interaction):
     view = RoleView()
     await interaction.response.send_message(f"**cheesecake role manager**\n{role_info}", view=view, ephemeral=True)
 
-# Run bot
+# Run the bot
 if __name__ == "__main__":
-    token = os.getenv('DISCORD_TOKEN')
-    if not token:
-        logger.error("DISCORD_TOKEN not found!")
+    TOKEN = os.getenv('DISCORD_TOKEN')
+    
+    if not TOKEN:
+        print("BOT_TOKEN not found in environment variables")
+        print("set it like: export BOT_TOKEN=your_token")
         exit(1)
-    bot.run(token)
+    
+    try:
+        bot.run(TOKEN)
+    except discord.LoginFailure:
+        print("invalid bot token")
+    except Exception as e:
+        print(f"error running bot: {e}")
