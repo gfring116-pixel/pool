@@ -1552,236 +1552,254 @@ async def resetmerit(ctx, roblox_name: str):
                 return await ctx.send(f"🔁 {roblox_name}'s merit reset to 0.")
     await ctx.send("❌ User not found.")
 
-# Cheesecake Role Manager
-@bot.command(name="cheesecake")
-@is_cheesecake_user()
-async def cheesecake(ctx):
-    existing = managed_roles.get(ctx.author.id)
-    embed = discord.Embed(
-        title="🧀 Cheesecake Role Manager",
-        description="Create, edit, or delete your personal role.",
-        color=discord.Color.gold()
-    )
-    if existing:
-        embed.add_field(name="Current Role", value=f"<@&{existing.id}>", inline=False)
-    else:
-        embed.add_field(name="Current Role", value="None", inline=False)
-    view = CheesecakeMainView(ctx.author.id)
-    await ctx.send(embed=embed, view=view)
+# Bot owner ID
+BOT_OWNER_ID = 728201873366056992
 
-class CheesecakeMainView(discord.ui.View):
-    def __init__(self, author_id):
-        super().__init__(timeout=300)
-        self.author_id = author_id
+# Dictionary to store special roles for each guild
+special_roles = {}
 
-    @discord.ui.button(label="Create Role", style=discord.ButtonStyle.success)
-    async def create(self, interaction, button):
-        if self.author_id in managed_roles:
-            return await interaction.response.send_message("❌ You already created a role. Delete it first.", ephemeral=True)
-        role = await interaction.guild.create_role(name="🧀 Cheesecake", color=discord.Color.random())
-        await interaction.user.add_roles(role)
-        managed_roles[self.author_id] = role
-        await interaction.response.send_message(f"✅ Created and assigned role: {role.mention}", ephemeral=True)
-
-    @discord.ui.button(label="Edit Role", style=discord.ButtonStyle.primary)
-    async def edit(self, interaction, button):
-        role = managed_roles.get(self.author_id)
-        if not role:
-            return await interaction.response.send_message("❌ No role to edit.", ephemeral=True)
-        view = RoleEditView(self.author_id, role)
-        embed = discord.Embed(title="🎛️ Edit Role", description=f"Role: {role.mention}", color=role.color)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @discord.ui.button(label="Delete Role", style=discord.ButtonStyle.danger)
-    async def delete(self, interaction, button):
-        role = managed_roles.get(self.author_id)
-        if not role:
-            return await interaction.response.send_message("❌ No role to delete.", ephemeral=True)
-        await role.delete()
-        del managed_roles[self.author_id]
-        await interaction.response.send_message("🗑️ Role deleted.", ephemeral=True)
-
-    async def interaction_check(self, interaction):
-        return interaction.user.id == self.author_id
-
-class RoleEditView(discord.ui.View):
-    def __init__(self, author_id, role):
-        super().__init__(timeout=300)
-        self.author_id = author_id
-        self.role = role
-
-    @discord.ui.button(label="Change Name", style=discord.ButtonStyle.primary)
-    async def rename(self, interaction, button):
-        await interaction.response.send_modal(RoleNameModal(self.role))
-
-    @discord.ui.button(label="Change Color", style=discord.ButtonStyle.secondary)
-    async def recolor(self, interaction, button):
-        await interaction.response.send_modal(RoleColorModal(self.role))
-
-    @discord.ui.button(label="Edit Permissions", style=discord.ButtonStyle.secondary)
-    async def edit_permissions(self, interaction, button):
-        view = PermissionView(self.author_id, self.role)
-        embed = discord.Embed(
-            title="🛡️ Edit Role Permissions",
-            description="Click buttons to toggle specific permissions for your Cheesecake role.",
-            color=self.role.color
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-
-
-class RoleNameModal(discord.ui.Modal, title="📝 Change Role Name"):
-    def __init__(self, role):
-        self.role = role
-        super().__init__()
-        self.name = discord.ui.TextInput(label="New Name", placeholder="Enter role name", max_length=100)
-        self.add_item(self.name)
-
-    async def on_submit(self, interaction):
-        await self.role.edit(name=self.name.value)
-        await interaction.response.send_message(f"✅ Role renamed to `{self.name.value}`", ephemeral=True)
-
-class PermissionView(discord.ui.View):
-    def __init__(self, author_id, role):
-        super().__init__(timeout=300)
-        self.author_id = author_id
-        self.role = role
-        self.refresh_buttons()
-
-    def refresh_buttons(self):
-        self.clear_items()
-        self.perms_to_toggle = [
-            ("Admin", "administrator"),
-            ("Manage Server", "manage_guild"),
-            ("Manage Roles", "manage_roles"),
-            ("Manage Channels", "manage_channels"),
-            ("Kick Members", "kick_members"),
-            ("Ban Members", "ban_members"),
-            ("Mention Everyone", "mention_everyone"),
-            ("Send Messages", "send_messages"),
-            ("Read Messages", "read_messages"),
-            ("Attach Files", "attach_files")
-        ]
-
-        current = self.role.permissions or discord.Permissions.none()
-
-        for label, attr in self.perms_to_toggle:
-            try:
-                value = getattr(current, attr, False)
-            except:
-                value = False
-            style = discord.ButtonStyle.success if value else discord.ButtonStyle.secondary
-            button = discord.ui.Button(label=f"{label}: {'✅' if value else '❌'}", style=style, custom_id=attr)
-            button.callback = self.make_toggle(attr)
-            self.add_item(button)
-
-        # Add extra control buttons
-        self.add_item(discord.ui.Button(label="🔁 Reset All", style=discord.ButtonStyle.danger, custom_id="reset_all", row=3))
-        self.add_item(discord.ui.Button(label="🧾 Preview", style=discord.ButtonStyle.secondary, custom_id="preview", row=3))
-        self.add_item(discord.ui.Button(label="✍️ Custom Perms", style=discord.ButtonStyle.primary, custom_id="custom", row=3))
-
-def make_toggle(self, perm_name):
-    async def callback(interaction: discord.Interaction):
-        if interaction.user.id != self.author_id:
-            return await interaction.response.send_message("❌ You're not allowed to edit this role.", ephemeral=True)
-
-        current_perms = self.role.permissions or discord.Permissions.none()
-        current_value = getattr(current_perms, perm_name, False)
-
-        # ✅ Build a copy of permissions safely
-        new_perms = discord.Permissions()
-        for perm, value in current_perms:
-            setattr(new_perms, perm, value)
-        setattr(new_perms, perm_name, not current_value)
-
-        try:
-            await self.role.edit(permissions=new_perms)
-            self.refresh_buttons()
-            await interaction.response.edit_message(view=self)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Failed to update permission: {e}", ephemeral=True)
-
-    return callback
+class RoleView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)  # 5 minute timeout
     
-    @discord.ui.button(label="⚙️ Hidden Handler", style=discord.ButtonStyle.secondary, disabled=True)
-    async def handler(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass  # hidden placeholder to suppress empty UI warnings
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.author_id
-
-    async def on_timeout(self):
-        pass
-
-    async def interaction_check(self, interaction: discord.Interaction):
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message("❌ This editor is not for you.", ephemeral=True)
-            return False
-        return True
-
-    async def on_error(self, error: Exception, item, interaction: discord.Interaction):
-        await interaction.response.send_message(f"❌ Unexpected error: {error}", ephemeral=True)
-
-    async def on_button_click(self, interaction: discord.Interaction):
-        custom_id = interaction.data.get("custom_id")
-
-        if custom_id == "reset_all":
-            try:
-                await self.role.edit(permissions=discord.Permissions.none())
-                self.refresh_buttons()
-                await interaction.response.edit_message(view=self)
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Failed to reset: {e}", ephemeral=True)
-
-        elif custom_id == "preview":
-            perms = self.role.permissions or discord.Permissions.none()
-            embed = discord.Embed(title=f"🔎 Permissions for `{self.role.name}`", color=self.role.color)
-            enabled = [name for name, attr in self.perms_to_toggle if getattr(perms, attr, False)]
-            embed.description = "\n".join(f"✅ {name}" for name in enabled) or "*None enabled*"
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-        elif custom_id == "custom":
-            await interaction.response.send_modal(CustomPermModal(self.role, self))
-
-class CustomPermModal(discord.ui.Modal, title="✍️ Set Custom Permissions"):
-    def __init__(self, role, view):
-        super().__init__()
-        self.role = role
-        self.view = view
-        self.perms_input = discord.ui.TextInput(
-            label="Permissions (comma-separated)",
-            placeholder="Example: send_messages, kick_members, ban_members",
-            required=True,
-            max_length=200
-        )
-        self.add_item(self.perms_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        perms = self.perms_input.value.lower().replace(" ", "").split(",")
-        valid = {p: True for p in perms}
+    @discord.ui.button(label='Create Role', style=discord.ButtonStyle.green, emoji='➕')
+    async def create_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != BOT_OWNER_ID:
+            await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
+            return
+        
+        modal = CreateRoleModal()
+        await interaction.response.send_modal(modal)
+    
+    @discord.ui.button(label='Edit Permissions', style=discord.ButtonStyle.blurple, emoji='✏️')
+    async def edit_permissions(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != BOT_OWNER_ID:
+            await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
+            return
+        
+        guild = interaction.guild
+        if guild.id not in special_roles:
+            await interaction.response.send_message("no special role exists, make one first", ephemeral=True)
+            return
+        
+        role = guild.get_role(special_roles[guild.id])
+        if not role:
+            await interaction.response.send_message("role not found, probably got deleted", ephemeral=True)
+            del special_roles[guild.id]
+            return
+        
+        modal = EditPermissionsModal(role)
+        await interaction.response.send_modal(modal)
+    
+    @discord.ui.button(label='Delete Role', style=discord.ButtonStyle.red, emoji='🗑️')
+    async def delete_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != BOT_OWNER_ID:
+            await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
+            return
+        
+        guild = interaction.guild
+        if guild.id not in special_roles:
+            await interaction.response.send_message("no special role to delete", ephemeral=True)
+            return
+        
+        role = guild.get_role(special_roles[guild.id])
+        if not role:
+            await interaction.response.send_message("role not found, probably already deleted", ephemeral=True)
+            del special_roles[guild.id]
+            return
+        
         try:
-            updated = discord.Permissions(**valid)
-            await self.role.edit(permissions=updated)
-            self.view.refresh_buttons()
-            await interaction.response.edit_message(view=self.view)
+            role_name = role.name
+            await role.delete()
+            del special_roles[guild.id]
+            await interaction.response.send_message(f"deleted role: **{role_name}**", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("can't delete this role, missing perms", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Invalid permissions: {e}", ephemeral=True)
+            await interaction.response.send_message(f"failed to delete role: {str(e)}", ephemeral=True)
 
-class RoleColorModal(discord.ui.Modal, title="🎨 Change Role Color"):
-    def __init__(self, role):
-        self.role = role
+class CreateRoleModal(discord.ui.Modal, title='Create Role'):
+    def __init__(self):
         super().__init__()
-        self.hex = discord.ui.TextInput(label="Hex Color (e.g. #ff0000)", placeholder="#ffcc00", max_length=7)
-        self.add_item(self.hex)
-
-    async def on_submit(self, interaction):
-        hex_code = self.hex.value.lstrip('#')
+    
+    name = discord.ui.TextInput(
+        label='Role Name',
+        placeholder='Enter the role name...',
+        required=True,
+        max_length=100
+    )
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        role_name = self.name.value.strip()
+        
+        if not role_name:
+            await interaction.response.send_message("gimme a role name dummy", ephemeral=True)
+            return
+        
+        # Check if special role already exists and delete it
+        if guild.id in special_roles:
+            try:
+                old_role = guild.get_role(special_roles[guild.id])
+                if old_role:
+                    await old_role.delete()
+                    await interaction.followup.send(f"deleted old role: {old_role.name}")
+            except:
+                pass
+        
+        # Create new role
         try:
-            color = discord.Color(int(hex_code, 16))
-            await self.role.edit(color=color)
-            await interaction.response.send_message(f"✅ Color updated.", ephemeral=True)
-        except:
-            await interaction.response.send_message("❌ Invalid hex color.", ephemeral=True)
+            new_role = await guild.create_role(
+                name=role_name,
+                color=discord.Color.blue(),
+                hoist=True,
+                mentionable=True
+            )
+            
+            # Store the role ID
+            special_roles[guild.id] = new_role.id
+            
+            await interaction.response.send_message(f"made role: **{new_role.name}** (ID: {new_role.id})", ephemeral=True)
+            
+        except discord.Forbidden:
+            await interaction.response.send_message("can't create roles, missing perms", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"failed to create role: {str(e)}", ephemeral=True)
+
+class EditPermissionsModal(discord.ui.Modal, title='Edit Role Permissions'):
+    def __init__(self, role):
+        super().__init__()
+        self.role = role
+    
+    permission = discord.ui.TextInput(
+        label='Permission Name',
+        placeholder='admin, kick, ban, send_messages, etc.',
+        required=True,
+        max_length=50
+    )
+    
+    value = discord.ui.TextInput(
+        label='Permission Value',
+        placeholder='true/false, yes/no, 1/0, on/off',
+        required=True,
+        max_length=10
+    )
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        permission_name = self.permission.value.lower().strip()
+        value_str = self.value.value.lower().strip()
+        
+        # Convert string to boolean
+        if value_str in ['true', 'yes', '1', 'on']:
+            perm_value = True
+        elif value_str in ['false', 'no', '0', 'off']:
+            perm_value = False
+        else:
+            await interaction.response.send_message("use true/false, yes/no, 1/0, or on/off", ephemeral=True)
+            return
+        
+        # Map common permission names
+        permission_map = {
+            'admin': 'administrator',
+            'manage_roles': 'manage_roles',
+            'manage_channels': 'manage_channels',
+            'manage_guild': 'manage_guild',
+            'manage_messages': 'manage_messages',
+            'kick': 'kick_members',
+            'ban': 'ban_members',
+            'mention_everyone': 'mention_everyone',
+            'send_messages': 'send_messages',
+            'read_messages': 'read_messages',
+            'view_channel': 'view_channel',
+            'connect': 'connect',
+            'speak': 'speak',
+            'mute_members': 'mute_members',
+            'deafen_members': 'deafen_members',
+            'move_members': 'move_members'
+        }
+        
+        actual_perm = permission_map.get(permission_name, permission_name)
+        
+        try:
+            # Get current permissions
+            permissions = self.role.permissions
+            
+            # Check if permission exists
+            if not hasattr(permissions, actual_perm):
+                await interaction.response.send_message(f"unknown permission: {permission_name}", ephemeral=True)
+                return
+            
+            # Update permission
+            setattr(permissions, actual_perm, perm_value)
+            
+            # Apply changes
+            await self.role.edit(permissions=permissions)
+            
+            await interaction.response.send_message(f"updated **{self.role.name}** - {permission_name} is now {perm_value}", ephemeral=True)
+            
+        except discord.Forbidden:
+            await interaction.response.send_message("can't edit this role, missing perms", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"failed to edit role: {str(e)}", ephemeral=True)
+
+@bot.event
+async def on_ready():
+    print(f'{bot.user} is online!')
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        print(f'synced {len(synced)} commands')
+    except Exception as e:
+        print(f'failed to sync commands: {e}')
+
+@bot.command(name='cheesecake')
+async def cheesecake_command(ctx):
+    """Show the role management interface"""
+    
+    # Check if user is bot owner
+    if ctx.author.id != BOT_OWNER_ID:
+        await ctx.reply("nah you can't use this lol")
+        return
+    
+    # Show current role info
+    guild = ctx.guild
+    role_info = "no special role exists"
+    
+    if guild.id in special_roles:
+        role = guild.get_role(special_roles[guild.id])
+        if role:
+            role_info = f"current role: **{role.name}** (ID: {role.id})"
+        else:
+            role_info = "role not found, probably got deleted"
+            del special_roles[guild.id]
+    
+    view = RoleView()
+    await ctx.reply(f"**cheesecake role manager**\n{role_info}", view=view)
+
+# Alternative slash command version
+@bot.tree.command(name='cheesecake', description='Role management interface')
+async def cheesecake_slash(interaction: discord.Interaction):
+    """Show the role management interface"""
+    
+    # Check if user is bot owner
+    if interaction.user.id != BOT_OWNER_ID:
+        await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
+        return
+    
+    # Show current role info
+    guild = interaction.guild
+    role_info = "no special role exists"
+    
+    if guild.id in special_roles:
+        role = guild.get_role(special_roles[guild.id])
+        if role:
+            role_info = f"current role: **{role.name}** (ID: {role.id})"
+        else:
+            role_info = "role not found, probably got deleted"
+            del special_roles[guild.id]
+    
+    view = RoleView()
+    await interaction.response.send_message(f"**cheesecake role manager**\n{role_info}", view=view, ephemeral=True)
 
 # Run bot
 if __name__ == "__main__":
