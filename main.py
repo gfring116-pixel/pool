@@ -1808,6 +1808,64 @@ async def cheesecake_slash(interaction: discord.Interaction):
     view = RoleView()
     await interaction.response.send_message(f"**cheesecake role manager**\n{role_info}", view=view, ephemeral=True)
 
+# Load token from .env file
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+# Constants
+GUILD_ID = 1122152849833459842  # Replace with your actual server ID
+ROLE_ID = 1167865710144393346
+
+# Intents setup
+intents = discord.Intents.default()
+intents.members = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+
+@bot.command(name="dm")
+@commands.has_permissions(administrator=True)
+async def dm_command(ctx):
+    await ctx.send("Starting DM process...")
+
+    guild = bot.get_guild(GUILD_ID)
+    role = guild.get_role(ROLE_ID)
+
+    if not role:
+        await ctx.send("❌ Role not found.")
+        return
+
+    success = 0
+    failed = 0
+
+    for member in role.members:
+        try:
+            embed = discord.Embed(
+                title="📢 Mandatory Rally Notice",
+                description="Join the rally in **IGA**.\n[Click here to join](https://www.roblox.com/games/74372042027527/Camp-Augsburg)",
+                color=0xFF5733
+            )
+            embed.set_footer(text="This event is mandatory.")
+
+            await member.send(embed=embed)
+            await asyncio.sleep(1)
+
+            await member.send("Don't forget to wear your uniform.")
+            await asyncio.sleep(1)
+
+            await member.send("Be there on time or you will be marked absent.")
+            await asyncio.sleep(1)
+
+            success += 1
+        except Exception as e:
+            failed += 1
+            print(f"Failed to message {member.name}: {e}")
+
+    await ctx.send(f"✅ Finished!\n🟢 Success: `{success}`\n🔴 Failed: `{failed}`")
+
+
 # Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
