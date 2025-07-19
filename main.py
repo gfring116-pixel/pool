@@ -1808,18 +1808,9 @@ async def cheesecake_slash(interaction: discord.Interaction):
     view = RoleView()
     await interaction.response.send_message(f"**cheesecake role manager**\n{role_info}", view=view, ephemeral=True)
 
-# Load token from .env file
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-
 # Constants
 GUILD_ID = 1122152849833459842  # Replace with your actual server ID
 ROLE_ID = 1167865710144393346
-
-# Intents setup
-intents = discord.Intents.default()
-intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
