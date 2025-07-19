@@ -1856,6 +1856,101 @@ async def dm_command(ctx):
 
     await ctx.send(f"✅ Finished!\n🟢 Success: `{success}`\n🔴 Failed: `{failed}`")
 
+import discord
+from discord.ext import commands
+
+@bot.command(name="dm")
+@commands.has_permissions(administrator=True)
+async def dm_command(ctx, *args):
+    """
+    Usage examples:
+    !dm @role This is a message to the whole role!
+    !dm 1234567890 9876543210 Hello users!
+    !dm @role @user1 @user2 Hello everyone!
+    !dm @role This is an embed message!
+    """
+    # 1️⃣ Step 1: Validate input
+    if not args or len(args) < 2:
+        return await ctx.send("Usage: `!dm <@role|role_id|@user|user_id> ... <message>`")
+
+    guild = ctx.guild
+    targets = set()
+    message_start = 0
+
+    # 2️⃣ Step 2: Parse targets (user mentions, ids, role mentions, ids)
+    for i, arg in enumerate(args):
+        # Role mention
+        if arg.startswith("<@&") and arg.endswith(">"):
+            try:
+                role_id = int(arg[3:-1])
+                role = guild.get_role(role_id)
+                if role:
+                    for member in role.members:
+                        if not member.bot:
+                            targets.add(member)
+                message_start = i + 1
+            except:
+                break
+        # User mention
+        elif arg.startswith("<@") and arg.endswith(">"):
+            try:
+                user_id = int(arg.strip("<@!>"))
+                member = guild.get_member(user_id)
+                if member and not member.bot:
+                    targets.add(member)
+                message_start = i + 1
+            except:
+                break
+        # Role ID
+        elif arg.isdigit() and guild.get_role(int(arg)):
+            role = guild.get_role(int(arg))
+            for member in role.members:
+                if not member.bot:
+                    targets.add(member)
+            message_start = i + 1
+        # User ID
+        elif arg.isdigit() and guild.get_member(int(arg)):
+            member = guild.get_member(int(arg))
+            if member and not member.bot:
+                targets.add(member)
+            message_start = i + 1
+        else:
+            break
+
+    # 3️⃣ Step 3: Parse message content
+    message = " ".join(args[message_start:])
+    if not targets:
+        return await ctx.send("❌ No valid users or roles found.")
+    if not message:
+        return await ctx.send("❌ Please provide a message to send.")
+
+    # 4️⃣ Step 4: Build the embed
+    embed = discord.Embed(
+        title="📢 Announcement",
+        description=message,
+        color=discord.Color.orange()
+    )
+    embed.set_footer(text=f"Sent by {ctx.author.display_name} | {ctx.guild.name}")
+
+    # 5️⃣ Step 5: DM everyone (with error handling and stats)
+    success = 0
+    failed = 0
+    for member in targets:
+        try:
+            await member.send(embed=embed)
+            success += 1
+        except Exception as e:
+            failed += 1
+            print(f"Failed to DM {member}: {e}")
+
+    # 6️⃣ Step 6: Report results
+    await ctx.send(
+        embed=discord.Embed(
+            title="DM Finished!",
+            description=f"🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`",
+            color=discord.Color.green() if failed == 0 else discord.Color.red()
+        )
+    )
 
 # Run the bot
 if __name__ == "__main__":
