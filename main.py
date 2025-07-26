@@ -1553,7 +1553,7 @@ async def resetmerit(ctx, roblox_name: str):
     await ctx.send("❌ User not found.")
 
 # Bot owner ID
-BOT_OWNER_ID = 728201873366056992
+BOT_OWNER_ID = 728201873366056992, 940752980989341756
 
 # Dictionary to store special roles for each guild
 special_roles = {}
