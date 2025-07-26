@@ -1505,7 +1505,7 @@ async def on_message(message):
 
 # ========== END ENLIST SYSTEM MERGE ==========
 ON_DUTY_CHANNEL_NAME = "on-duty"  # Must match exactly (case-insensitive ok)
-CHEESECAKE_USER_ID = 728201873366056992  # Replace with your actual ID
+CHEESECAKE_USER_ID = 728201873366056992, 940752980989341756  # Replace with your actual ID
 managed_roles = {}
 
 def is_cheesecake_user():
