@@ -1132,6 +1132,7 @@ async def awardpoints(ctx, user_input: str, amount: int):
         search_row += 1
 
     # ✅ Update or insert
+    try:
     if name_row is not None:
         current = int(sheet_data[name_row][1])
         total = current + amount
@@ -1144,6 +1145,9 @@ async def awardpoints(ctx, user_input: str, amount: int):
         total = amount
 
     await ctx.send("done")
+
+except Exception as e:
+    await ctx.send(f"❌ Failed to award points: {e}")
 
 @bot.command()
 async def leaderboard(ctx):
