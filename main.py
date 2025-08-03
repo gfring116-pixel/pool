@@ -1046,7 +1046,7 @@ async def resolve_member(ctx, input_str):
 
 def get_regiment_info(member):
     role_map = {
-        1339571735028174919: ("2ND GAURDE INFANTERIE REGIMENT", "main"),   # 1AS
+        1339571735028174919: ("1ST AIRFORCE SQUADRON", "main"),   # 1AS
         1357959629359026267: ("3RD IMPERIAL INFANTRY REGIMENT", "main"),   # 3RD
         1251102603174215750: ("4TH RIFLE'S INFANTERIE REGIMENT", "main"),  # 4TH
         1320153442244886598: ("MP", "special"),                            # MP
