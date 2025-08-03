@@ -1132,7 +1132,7 @@ async def awardpoints(ctx, user_input: str, amount: int):
         search_row += 1
 
     # ✅ Update or insert
-    try:
+try:
     if name_row is not None:
         current = int(sheet_data[name_row][1])
         total = current + amount
