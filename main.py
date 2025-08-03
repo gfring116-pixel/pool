@@ -1147,7 +1147,7 @@ async def awardpoints(ctx, user_input: str, amount: int):
         sheet.update_note(cell, f"Discord ID: {member.id}")
         total = amount
 
-    await ctx.send("done")
+    await ctx.send(f"Points successfully awarded to {member.display_name}.")
 
 @bot.command()
 async def leaderboard(ctx):
