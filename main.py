@@ -1558,7 +1558,7 @@ class RoleView(discord.ui.View):
     
     @discord.ui.button(label='Create Role', style=discord.ButtonStyle.green, emoji='➕')
     async def create_role(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != BOT_OWNER_ID:
+        if interaction.user.id not in BOT_OWNER_ID:
             await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
             return
         
@@ -1567,7 +1567,7 @@ class RoleView(discord.ui.View):
     
     @discord.ui.button(label='Edit Permissions', style=discord.ButtonStyle.blurple, emoji='✏️')
     async def edit_permissions(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != BOT_OWNER_ID:
+        if interaction.user.id not in BOT_OWNER_ID:
             await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
             return
         
@@ -1587,7 +1587,7 @@ class RoleView(discord.ui.View):
     
     @discord.ui.button(label='Delete Role', style=discord.ButtonStyle.red, emoji='🗑️')
     async def delete_role(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != BOT_OWNER_ID:
+        if interaction.user.id not in BOT_OWNER_ID:
             await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
             return
         
@@ -1758,7 +1758,7 @@ async def cheesecake_command(ctx):
     """Show the role management interface"""
     
     # Check if user is bot owner
-    if ctx.author.id != BOT_OWNER_ID:
+    if ctx.author.id not in BOT_OWNER_ID:
         await ctx.reply("nah you can't use this lol")
         return
     
@@ -1783,7 +1783,7 @@ async def cheesecake_slash(interaction: discord.Interaction):
     """Show the role management interface"""
     
     # Check if user is bot owner
-    if interaction.user.id != BOT_OWNER_ID:
+    if interaction.user.id not in BOT_OWNER_ID:
         await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
         return
     
