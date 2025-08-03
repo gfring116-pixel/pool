@@ -1143,17 +1143,7 @@ async def awardpoints(ctx, user_input: str, amount: int):
         sheet.update_note(insert_row, 1, f"Discord ID: {member.id}")
         total = amount
 
-    embed = discord.Embed(
-        title="✅ Merit Awarded",
-        description=(
-            f"👤 **{roblox_username}**\n"
-            f"🎖️ **Regiment:** {info['header']}\n"
-            f"➕ **Awarded:** {amount} points\n"
-            f"📊 **Total:** {total}"
-        ),
-        color=discord.Color.green()
-    )
-    await ctx.send(embed=embed)
+    await ctx.send("done")
 
 @bot.command()
 async def leaderboard(ctx):
