@@ -922,6 +922,7 @@ import gspread
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from gspread.utils import rowcol_to_a1
 
 load_dotenv()
 
@@ -1136,11 +1137,14 @@ async def awardpoints(ctx, user_input: str, amount: int):
         current = int(sheet_data[name_row][1])
         total = current + amount
         sheet.update_cell(name_row + 1, 2, total)
-        sheet.update_note(name_row + 1, 1, f"Discord ID: {member.id}")
+        cell = rowcol_to_a1(name_row + 1, 1)
+        sheet.update_note(cell, f"Discord ID: {member.id}")
+
     else:
         insert_row = search_row + 1
         sheet.insert_row([roblox_username, amount], insert_row)
-        sheet.update_note(insert_row, 1, f"Discord ID: {member.id}")
+        cell = rowcol_to_a1(insert_row, 1)
+        sheet.update_note(cell, f"Discord ID: {member.id}")
         total = amount
 
     await ctx.send("done")
