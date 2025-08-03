@@ -1555,62 +1555,6 @@ special_roles = {}
 class RoleView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=300)  # 5 minute timeout
-
-    @discord.ui.button(label='Say As Someone', style=discord.ButtonStyle.gray, emoji='🗣️')
-    async def say_as_user(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id not in BOT_OWNER_ID:
-            await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
-            return
-        await interaction.response.send_modal(SayAsModal())
-
-class SayAsModal(discord.ui.Modal, title="say as someone"):
-    def __init__(self):
-        super().__init__()
-        self.user_id = discord.ui.TextInput(
-            label="user id or mention",
-            placeholder="paste their id or mention them",
-            required=True,
-            max_length=50
-        )
-        self.content = discord.ui.TextInput(
-            label="what u wanna say",
-            style=discord.TextStyle.paragraph,
-            placeholder="message goes here",
-            required=True,
-            max_length=2000
-        )
-        self.add_item(self.user_id)
-        self.add_item(self.content)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            raw = self.user_id.value.strip()
-            user_id = int(raw.strip("<@!>")) if raw.startswith("<@") else int(raw)
-            
-            try:
-                user = await interaction.client.fetch_user(user_id)
-            except:
-                return await interaction.response.send_message("cant find that user", ephemeral=True)
-
-            webhooks = await interaction.channel.webhooks()
-            webhook = discord.utils.get(webhooks, name="CheesecakeWebhook")
-            if webhook is None:
-                webhook = await interaction.channel.create_webhook(name="CheesecakeWebhook")
-
-            # Bad grammar version
-            msg = self.content.value.lower()
-            msg = msg.replace("you", "u").replace("are", "r").replace("your", "ur").replace("you're", "ur")
-            msg = msg.replace(".", "").replace(",", "").replace(" i ", " i ").replace("have", "got")
-
-            await webhook.send(
-                content=msg,
-                username=user.name,
-                avatar_url=user.display_avatar.url
-            )
-
-            await interaction.response.send_message("sent it", ephemeral=True)
-        except:
-            await interaction.response.send_message("bro error", ephemeral=True)
     
     @discord.ui.button(label='Create Role', style=discord.ButtonStyle.green, emoji='➕')
     async def create_role(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1667,6 +1611,62 @@ class SayAsModal(discord.ui.Modal, title="say as someone"):
             await interaction.response.send_message("can't delete this role, missing perms", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"failed to delete role: {str(e)}", ephemeral=True)
+
+    @discord.ui.button(label='Say As Someone', style=discord.ButtonStyle.gray, emoji='🗣️')
+    async def say_as_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in BOT_OWNER_ID:
+            await interaction.response.send_message("nah you can't use this lol", ephemeral=True)
+            return
+        await interaction.response.send_modal(SayAsModal())
+
+class SayAsModal(discord.ui.Modal, title="say as someone"):
+    def __init__(self):
+        super().__init__()
+        self.user_id = discord.ui.TextInput(
+            label="user id or mention",
+            placeholder="paste their id or mention them",
+            required=True,
+            max_length=50
+        )
+        self.content = discord.ui.TextInput(
+            label="what u wanna say",
+            style=discord.TextStyle.paragraph,
+            placeholder="message goes here",
+            required=True,
+            max_length=2000
+        )
+        self.add_item(self.user_id)
+        self.add_item(self.content)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            raw = self.user_id.value.strip()
+            user_id = int(raw.strip("<@!>")) if raw.startswith("<@") else int(raw)
+            
+            try:
+                user = await interaction.client.fetch_user(user_id)
+            except:
+                return await interaction.response.send_message("cant find that user", ephemeral=True)
+
+            webhooks = await interaction.channel.webhooks()
+            webhook = discord.utils.get(webhooks, name="CheesecakeWebhook")
+            if webhook is None:
+                webhook = await interaction.channel.create_webhook(name="CheesecakeWebhook")
+
+            # Bad grammar version
+            msg = self.content.value.lower()
+            msg = msg.replace("you", "u").replace("are", "r").replace("your", "ur").replace("you're", "ur")
+            msg = msg.replace(".", "").replace(",", "").replace(" i ", " i ").replace("have", "got")
+
+            await webhook.send(
+                content=msg,
+                username=user.name,
+                avatar_url=user.display_avatar.url
+            )
+
+            await interaction.response.send_message("sent it", ephemeral=True)
+        except:
+            await interaction.response.send_message("bro error", ephemeral=True)
 
 class CreateRoleModal(discord.ui.Modal, title='Create Role'):
     def __init__(self):
