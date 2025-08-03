@@ -1802,6 +1802,25 @@ async def cheesecake_slash(interaction: discord.Interaction):
     view = RoleView()
     await interaction.response.send_message(f"**cheesecake role manager**\n{role_info}", view=view, ephemeral=True)
 
+@commands.command()
+@commands.has_role("Cheesecake")
+async def sayas(self, ctx, target: discord.Member, *, message):
+    # Get existing webhook or create one
+    webhooks = await ctx.channel.webhooks()
+    webhook = discord.utils.get(webhooks, name="CheesecakeWebhook")
+
+    if webhook is None:
+        webhook = await ctx.channel.create_webhook(name="CheesecakeWebhook")
+
+    await webhook.send(
+        content=message,
+        username=target.display_name,
+        avatar_url=target.display_avatar.url
+    )
+
+    await ctx.message.delete()  # optional: delete the command call
+
+
 import discord
 from discord.ext import commands
 
