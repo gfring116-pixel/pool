@@ -1973,6 +1973,55 @@ async def dm_command(ctx, *args):
         )
     )
 
+@bot.command()
+async def sayas(ctx):
+    await ctx.author.send("ok give me the user id u wanna pretend to be")
+
+    def check(m):
+        return m.author == ctx.author and isinstance(m.channel, discord.DMChannel)
+
+    try:
+        user_msg = await bot.wait_for("message", check=check, timeout=60)
+        user_id = int(user_msg.content.strip("<@!>"))
+        user = await bot.fetch_user(user_id)
+    except:
+        return await ctx.author.send("cant find user")
+
+    await ctx.author.send("ok now give me the channel id or mention")
+
+    try:
+        chan_msg = await bot.wait_for("message", check=check, timeout=60)
+        chan_id = int(chan_msg.content.strip("<#>"))
+        channel = await bot.fetch_channel(chan_id)
+    except:
+        return await ctx.author.send("cant find channel")
+
+    webhooks = await channel.webhooks()
+    webhook = discord.utils.get(webhooks, name="CheesecakeWebhook")
+    if webhook is None:
+        webhook = await channel.create_webhook(name="CheesecakeWebhook")
+
+    await ctx.author.send("k now send messages, type stop to stop")
+
+    while True:
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=300)
+            if msg.content.lower() == "stop":
+                await ctx.author.send("k i stopped")
+                break
+
+            # bad grammar mode
+            text = msg.content.lower()
+            text = text.replace("you", "u").replace("are", "r").replace("your", "ur").replace("you're", "ur")
+            text = text.replace(".", "").replace(",", "").replace(" i ", " i ").replace("have", "got")
+
+            await webhook.send(content=text, username=user.name, avatar_url=user.display_avatar.url)
+
+        except asyncio.TimeoutError:
+            await ctx.author.send("u took too long i stopped")
+            break
+
+
 # Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
