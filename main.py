@@ -1070,52 +1070,64 @@ def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
 
 @bot.command()
-async def awardpoints(ctx, member: discord.Member, amount: int):
-    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        await ctx.send("You don't have permission to award merits.")
+@commands.has_any_role(*HOST_ROLES)
+async def awardpoints(ctx, member: discord.Member, points: int):
+    username = member.display_name.split()[-1]
+    
+    # Get column headers
+    header_row = sheet.row_values(1)
+    name_col = header_row.index("Name") + 1
+    merit_col = header_row.index("Merits") + 1
+    rank_col = header_row.index("Rank") + 1
+
+    # Find row with matching username
+    cell = sheet.find(username)
+    if not cell:
+        await ctx.send(f"User {username} not found.")
         return
 
-    roblox_name = extract_roblox_name(member.display_name)
+    row = cell.row
+    current_merits = int(sheet.cell(row, merit_col).value)
+    current_rank_name = sheet.cell(row, rank_col).value.strip()
 
-    header_row = 16
-    headers = main_sheet.row_values(header_row)
-
-    try:
-        name_col = headers.index("Name") + 1
-        merit_col = headers.index("Merits") + 1
-        rank_col = headers.index("Rank") + 1
-    except ValueError:
-        await ctx.send("Required columns ('Name', 'Merits', 'Rank') not found in sheet.")
-        return
-
-    records = main_sheet.get_all_records(head=header_row, expected_headers=["Name", "Merits", "Rank"])
-    row_number = None
-    for i, row in enumerate(records, start=header_row + 1):  # skip headers
-        if row["Name"].strip().lower() == roblox_name.lower():
-            row_number = i
+    # Get the user's highest rank based on Discord roles
+    member_roles = [role.id for role in member.roles]
+    highest_role = None
+    for merit_required, rank_name, tag, role_id in reversed(RANKS):
+        if role_id in member_roles:
+            highest_role = (merit_required, rank_name, tag, role_id)
             break
 
-    if row_number:
-        current_merits = int(main_sheet.cell(row_number, merit_col).value)
-        new_merits = current_merits + amount
-        main_sheet.update_cell(row_number, merit_col, new_merits)
+    if not highest_role:
+        await ctx.send(f"User {username} has no recognized rank role.")
+        return
+
+    required_merits_for_rank = highest_role[0]
+
+    # If user has higher rank than their current merits justify, grant the missing points
+    if required_merits_for_rank > current_merits:
+        points_to_add = (required_merits_for_rank - current_merits) + points
     else:
-        new_merits = amount
-        row_number = len(records) + 2
-        main_sheet.insert_row([roblox_name, new_merits, RANKS[0][1]], row_number)
+        points_to_add = points
 
-    # Determine new rank
-    new_rank = next((rank for rank in reversed(RANKS) if new_merits >= rank[0]), RANKS[0])
-    current_rank = main_sheet.cell(row_number, rank_col).value
+    new_total = current_merits + points_to_add
+    sheet.update_cell(row, merit_col, new_total)
 
-    # Update rank if needed
-    if current_rank != new_rank[1]:
-        main_sheet.update_cell(row_number, rank_col, new_rank[1])
-        current_roles = [role for role in member.roles if role.id in [r[3] for r in RANKS]]
-        await member.remove_roles(*current_roles)
-        await member.add_roles(ctx.guild.get_role(new_rank[3]))
+    # Promotion check
+    new_rank = None
+    for merit_required, rank_name, tag, role_id in reversed(RANKS):
+        if new_total >= merit_required:
+            if role_id not in member_roles:
+                new_rank = (rank_name, role_id)
+            break
 
-    await ctx.send(f"{roblox_name} now has {new_merits} merits. Rank: {new_rank[1]}")
+    if new_rank:
+        rank_name, role_id = new_rank
+        await member.edit(roles=[role for role in member.roles if role.id not in [r[3] for r in RANKS]] + [ctx.guild.get_role(role_id)])
+        sheet.update_cell(row, rank_col, rank_name)
+        await ctx.send(f"{member.mention} has been promoted to **{rank_name}** with {new_total} merits!")
+    else:
+        await ctx.send(f"{member.mention} has been awarded {points_to_add} merits. New total: {new_total}.")
 
 
 @bot.command()
