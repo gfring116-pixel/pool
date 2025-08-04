@@ -1075,6 +1075,13 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     user_roles = [role.id for role in member.roles]
     has_rank_role = any(role_id in user_roles for _, _, _, role_id in RANKS)
 
+    import gspread
+
+    # Connect to Google Sheet
+    gc = gspread.service_account(filename='credentials.json')
+    sheet = gc.open("__1ST VANGUARD DIVISION MERIT DATA__")
+    worksheet = sheet.worksheet("Merit")
+
     if not has_rank_role:
         await ctx.send("This user is a high rank and cannot be awarded merits.")
         return
@@ -1083,7 +1090,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     roblox_username = member.display_name.split()[-1].strip()
 
     # Load the sheet
-    worksheet = sheet.worksheet("Merits")
+    worksheet = sheet.worksheet("Merit")
     data = worksheet.get_all_values()
     sheet_data = [row for row in data if any(cell.strip() for cell in row)]
 
