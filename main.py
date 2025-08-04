@@ -1075,31 +1075,32 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     if points <= 0:
         return await ctx.send("points must be a positive number.")
 
-    #extract roblox username
+    # extract roblox username
     roblox_username = extract_roblox_name(member.display_name)
     if roblox_username == "Unknown":
         return await ctx.send("member has no nickname set.")
 
-    #determine regiment and sheet
+    # determine regiment and pick sheet
     info = get_regiment_info(member)
     if not info:
         return await ctx.send("could not determine regiment or unsupported regiment.")
     sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
 
-    #locate header cells anywhere
-    name_cell  = sheet.find("Name")
-    merit_cell = sheet.find("Merits")
-    rank_cell  = sheet.find("Rank")
-    if not (name_cell and merit_cell and rank_cell):
+    # locate header cells anywhere
+    try:
+        name_cell  = sheet.find("Name")
+        merit_cell = sheet.find("Merits")
+        rank_cell  = sheet.find("Rank")
+    except CellNotFound:
         return await ctx.send("could not find one of: name, merits, rank")
 
-    #derive header positions
+    # derive header positions
     header_row = name_cell.row
     name_col   = name_cell.col
     merit_col  = merit_cell.col
     rank_col   = rank_cell.col
 
-    #find user row under the name header
+    # find user row under the name header
     data_start = header_row + 1
     col_vals   = sheet.col_values(name_col)[data_start-1:]
     try:
@@ -1108,24 +1109,24 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         return await ctx.send(f"user {roblox_username} not found in sheet")
     row = data_start + idx
 
-    #read current merits
+    # read current merits
     try:
         current_merits = int(sheet.cell(row, merit_col).value)
     except (ValueError, TypeError):
         current_merits = 0
 
-    #determine user's current rank role
+    # determine user's current rank role
     member_role_ids = {r.id for r in member.roles}
     highest = None
-    for req, name, tag, role_id in reversed(RANKS):
+    for req, rname, tag, role_id in reversed(RANKS):
         if role_id in member_role_ids:
-            highest = (req, name, role_id)
+            highest = (req, rname, role_id)
             break
     if not highest:
         return await ctx.send(f"user {roblox_username} has no rank role")
-    req_merits, current_rank_name, current_role_id = highest
+    req_merits, current_rank_name, _ = highest
 
-    #calculate points to add
+    # calculate points to add (fills any gap)
     if current_merits < req_merits:
         points_to_add = (req_merits - current_merits) + points
     else:
@@ -1133,15 +1134,16 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     new_total = current_merits + points_to_add
     sheet.update_cell(row, merit_col, new_total)
 
-    #check for promotion
+    # check for promotion
     new_rank = None
-    for req, name, tag, role_id in reversed(RANKS):
+    for req, rname, tag, role_id in reversed(RANKS):
         if new_total >= req and role_id not in member_role_ids:
-            new_rank = (name, role_id)
+            new_rank = (rname, role_id)
             break
 
-    #rebuild roles list without old rank roles
-    cleaned_roles = [r for r in member.roles if r.id not in {r_id for *_, r_id in RANKS}]
+    # rebuild roles list without old rank roles
+    old_role_ids = {r[3] for r in RANKS}
+    cleaned_roles = [r for r in member.roles if r.id not in old_role_ids]
     if new_rank:
         rank_name, rank_role_id = new_rank
         cleaned_roles.append(ctx.guild.get_role(rank_role_id))
@@ -1150,12 +1152,13 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     else:
         final_rank = current_rank_name
 
-    #update nickname to "[REGIMENT] RANK | roblox_username"
+    # update nickname to "[REGIMENT] RANK | roblox_username", truncated to 32 chars
     regiment_tag = info["regiment"]
-    new_nick = f"[{regiment_tag}] {final_rank} | {roblox_username}"
+    raw_nick = f"[{regiment_tag}] {final_rank} | {roblox_username}"
+    new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
     await member.edit(roles=cleaned_roles, nick=new_nick)
 
-    #send confirmation
+    # send confirmation
     if new_rank:
         await ctx.send(f"{member.mention} promoted to {final_rank} | total merits: {new_total}.")
     else:
