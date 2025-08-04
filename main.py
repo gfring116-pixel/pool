@@ -1077,7 +1077,9 @@ async def awardpoints(ctx, member: discord.Member, amount: int):
 
     roblox_name = extract_roblox_name(member.display_name)
 
-    headers = main_sheet.row_values(1)
+    header_row = 16
+    headers = main_sheet.row_values(header_row)
+
     try:
         name_col = headers.index("Name") + 1
         merit_col = headers.index("Merits") + 1
@@ -1088,7 +1090,7 @@ async def awardpoints(ctx, member: discord.Member, amount: int):
 
     records = main_sheet.get_all_records()
     row_number = None
-    for i, row in enumerate(records, start=2):  # skip headers
+    for i, row in enumerate(records, start=header_row + 1):  # skip headers
         if row["Name"].strip().lower() == roblox_name.lower():
             row_number = i
             break
