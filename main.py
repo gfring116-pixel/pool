@@ -1069,58 +1069,70 @@ def get_regiment_info(member):
 def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
 
-@bot.command()
-@commands.has_role("HOST_ROLES")
+@bot.command(name="awardpoints")
+@commands.has_any_role(*HOST_ROLES)
 async def awardpoints(ctx, member: discord.Member, points: int):
-    roblox_name = member.display_name.split()[-1]
-    await ctx.send(f"Updating {roblox_name} with {points} merit points...")
+    # Check if the user has a valid Roblox username
+    name_parts = member.display_name.split(" | ")
+    if len(name_parts) < 2:
+        await ctx.send("User’s Roblox name is missing from their display name.")
+        return
+    roblox_name = name_parts[-1]
 
-    try:
-        sheet = gc.open("__1ST VANGUARD DIVISION MERIT DATA__").sheet1
-        data = sheet.get_all_records()
-    except Exception:
-        await ctx.send("Could not access the Google Sheet.")
+    # Author must not award themselves
+    if member == ctx.author:
+        await ctx.send("You cannot award points to yourself.")
         return
 
-    row = None
-    for idx, entry in enumerate(data, start=2):
-        if entry["Name"].strip().lower() == roblox_name.lower():
-            row = idx
+    # Load credentials from Railway environment
+    creds_json = json.loads(os.environ.get("GOOGLE_SERVICE_ACCOUNT"))
+    creds = service_account.Credentials.from_service_account_info(creds_json)
+    gc = gspread.authorize(creds)
+
+    # Open the sheet
+    sheet = gc.open("__1ST VANGUARD DIVISION MERIT DATA__").sheet1
+    data = sheet.get_all_values()
+    header = data[0]
+    rows = data[1:]
+
+    name_col = header.index("Name")
+    merit_col = header.index("Merits")
+    rank_col = header.index("Rank")
+
+    user_found = False
+    for idx, row in enumerate(rows, start=2):  # Start from row 2 (index 1 in sheet)
+        if row[name_col].strip().lower() == roblox_name.lower():
+            current_merits = int(row[merit_col])
+            current_rank = row[rank_col]
+            current_index = RANK_NAME_INDEX.get(current_rank, -1)
+
+            # Prevent awarding if at max rank
+            if current_index == len(RANKS) - 1:
+                await ctx.send(f"{roblox_name} is already at the highest rank.")
+                return
+
+            new_merits = current_merits + points
+            sheet.update_cell(idx, merit_col + 1, new_merits)
+
+            promoted = False
+            for merit_required, rank_name, short, role_id in RANKS:
+                if new_merits >= merit_required and RANK_NAME_INDEX[rank_name] > current_index:
+                    await member.add_roles(discord.Object(id=role_id))
+                    old_role_id = RANKS[current_index][3]
+                    await member.remove_roles(discord.Object(id=old_role_id))
+                    sheet.update_cell(idx, rank_col + 1, rank_name)
+                    promoted = True
+                    await ctx.send(f"{roblox_name} has been promoted to {rank_name}.")
+                    break
+
+            if not promoted:
+                await ctx.send(f"{roblox_name} has been awarded {points} merit points.")
+            user_found = True
             break
 
-    if row is None:
-        await ctx.send(f"{roblox_name} not found in the sheet.")
-        return
+    if not user_found:
+        await ctx.send(f"{roblox_name} was not found in the merit sheet.")
 
-    current_points = int(sheet.cell(row, 2).value)
-    new_total = current_points + points
-    sheet.update_cell(row, 2, new_total)
-
-    current_rank = sheet.cell(row, 3).value.strip()
-    new_rank = current_rank
-    role_to_assign = None
-
-    for merit_threshold, rank_name, rank_code, role_id in reversed(RANKS):
-        if new_total >= merit_threshold:
-            if current_rank != rank_name:
-                new_rank = rank_name
-                sheet.update_cell(row, 3, new_rank)
-                role_to_assign = role_id
-            break
-
-    if role_to_assign:
-        for _, _, _, role_id in RANKS:
-            role = discord.utils.get(ctx.guild.roles, id=role_id)
-            if role in member.roles:
-                await member.remove_roles(role)
-
-        new_role = discord.utils.get(ctx.guild.roles, id=role_to_assign)
-        if new_role:
-            await member.add_roles(new_role)
-
-        await ctx.send(f"{roblox_name} now has {new_total} merits and has been promoted to {new_rank}.")
-    else:
-        await ctx.send(f"{roblox_name} now has {new_total} merits. No promotion.")
 
 @bot.command()
 async def leaderboard(ctx):
