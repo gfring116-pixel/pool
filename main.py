@@ -1129,6 +1129,15 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     else:
         await ctx.send(f"{member.mention} has been awarded {points_to_add} merits. New total: {new_total}.")
 
+# Update nickname with regiment and rank tag
+rank_tag = [r[2] for r in RANKS if r[1] == rank_name][0]
+username = member.display_name.split('|')[-1].strip()
+new_nick = f"{regiment_name} {rank_tag} | {username}"
+try:
+    await member.edit(nick=new_nick)
+except discord.Forbidden:
+    await ctx.send("I don't have permission to change their nickname.")
+
 
 @bot.command()
 async def leaderboard(ctx):
