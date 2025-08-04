@@ -1105,7 +1105,13 @@ async def awardpoints(ctx, user_input: str, amount: int):
         return "Recruit", "RCT", RANKS[0][3], 0
 
     if name_row is not None:
-        current_merits = int(sheet_data[name_row][1])
+        import re
+
+    raw_merits = str(sheet_data[name_row][1]).replace(",", "")  # Remove commas
+    if re.match(r"^\d+(\.\d+)?(e[+-]?\d+)?$", raw_merits.lower()):
+        current_merits = int(float(raw_merits))  # Handles scientific notation safely
+    else:
+        return await ctx.send(f"Invalid merit value for `{member.display_name}`: `{raw_merits}`")
         current_rank = sheet_data[name_row][2]
         _, _, _, current_rank_min = next(((minp, n, s, rid) for minp, n, s, rid in RANKS if n == current_rank), (0, "Recruit", "RCT", RANKS[0][3]))
 
