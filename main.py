@@ -1072,63 +1072,88 @@ def extract_roblox_name(nickname: str) -> str:
 @bot.command()
 @commands.has_any_role(*HOST_ROLES)
 async def awardpoints(ctx, member: discord.Member, points: int):
-    username = member.display_name.split()[-1]
-    
-    # Get column headers
-    header_row = sheet.row_values(1)
-    name_col = header_row.index("Name") + 1
-    merit_col = header_row.index("Merits") + 1
-    rank_col = header_row.index("Rank") + 1
+    if points <= 0:
+        return await ctx.send("points must be a positive number.")
 
-    # Find row with matching username
-    cell = sheet.find(username)
-    if not cell:
-        await ctx.send(f"User {username} not found.")
-        return
+    # extract roblox username
+    roblox_username = extract_roblox_name(member.display_name)
+    if roblox_username == "Unknown":
+        return await ctx.send("member has no nickname set.")
 
+    # determine regiment and sheet
+    info = get_regiment_info(member)
+    if not info:
+        return await ctx.send("could not determine regiment or unsupported regiment.")
+    sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
+
+    # find necessary columns
+    header = sheet.row_values(1)
+    try:
+        name_col = header.index("Name") + 1
+        merit_col = header.index("Merits") + 1
+        rank_col = header.index("Rank") + 1
+    except ValueError:
+        return await ctx.send("sheet is missing required columns.")
+
+    # locate user in sheet
+    try:
+        cell = sheet.find(roblox_username)
+    except gspread.exceptions.CellNotFound:
+        return await ctx.send(f"user {roblox_username} not found in sheet.")
     row = cell.row
-    current_merits = int(sheet.cell(row, merit_col).value)
-    current_rank_name = sheet.cell(row, rank_col).value.strip()
 
-    # Get the user's highest rank based on Discord roles
-    member_roles = [role.id for role in member.roles]
-    highest_role = None
-    for merit_required, rank_name, tag, role_id in reversed(RANKS):
-        if role_id in member_roles:
-            highest_role = (merit_required, rank_name, tag, role_id)
+    # read current merits
+    try:
+        current_merits = int(sheet.cell(row, merit_col).value)
+    except (ValueError, TypeError):
+        current_merits = 0
+
+    # find user's current rank role
+    member_role_ids = {r.id for r in member.roles}
+    highest = None
+    for req, name, tag, role_id in reversed(RANKS):
+        if role_id in member_role_ids:
+            highest = (req, name, role_id)
             break
+    if not highest:
+        return await ctx.send(f"user {roblox_username} has no rank role.")
+    req_merits, current_rank_name, current_role_id = highest
 
-    if not highest_role:
-        await ctx.send(f"User {username} has no recognized rank role.")
-        return
-
-    required_merits_for_rank = highest_role[0]
-
-    # If user has higher rank than their current merits justify, grant the missing points
-    if required_merits_for_rank > current_merits:
-        points_to_add = (required_merits_for_rank - current_merits) + points
+    # calculate points to add (fills any gap)
+    if current_merits < req_merits:
+        points_to_add = (req_merits - current_merits) + points
     else:
         points_to_add = points
-
     new_total = current_merits + points_to_add
     sheet.update_cell(row, merit_col, new_total)
 
-    # Promotion check
+    # check for promotion
     new_rank = None
-    for merit_required, rank_name, tag, role_id in reversed(RANKS):
-        if new_total >= merit_required:
-            if role_id not in member_roles:
-                new_rank = (rank_name, role_id)
+    for req, name, tag, role_id in reversed(RANKS):
+        if new_total >= req and role_id not in member_role_ids:
+            new_rank = (name, role_id)
             break
 
+    # rebuild role list: remove old rank roles, keep others
+    cleaned_roles = [r for r in member.roles if r.id not in {r_id for *_, r_id in RANKS}]
     if new_rank:
-        rank_name, role_id = new_rank
-        await member.edit(roles=[role for role in member.roles if role.id not in [r[3] for r in RANKS]] + [ctx.guild.get_role(role_id)])
+        rank_name, rank_role_id = new_rank
+        cleaned_roles.append(ctx.guild.get_role(rank_role_id))
         sheet.update_cell(row, rank_col, rank_name)
-        await ctx.send(f"{member.mention} has been promoted to **{rank_name}** with {new_total} merits!")
+        final_rank = rank_name
     else:
-        await ctx.send(f"{member.mention} has been awarded {points_to_add} merits. New total: {new_total}.")
+        final_rank = current_rank_name
 
+    # update nickname to "[REGIMENT] RANK | roblox_username"
+    regiment_tag = info["regiment"]    # e.g. "6TH", "MP", etc.
+    new_nick = f"[{regiment_tag}] {final_rank} | {roblox_username}"
+    await member.edit(roles=cleaned_roles, nick=new_nick)
+
+    # send confirmation
+    if new_rank:
+        await ctx.send(f"{member.mention} promoted to {final_rank} | total merits: {new_total}.")
+    else:
+        await ctx.send(f"{member.mention} awarded {points_to_add} merits | total merits: {new_total}.")
 
 @bot.command()
 async def leaderboard(ctx):
