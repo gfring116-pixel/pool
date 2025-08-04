@@ -1070,7 +1070,6 @@ def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
 
 @bot.command()
-@commands.has_any_role(*HOST_ROLES)
 async def awardpoints(ctx, member: discord.Member, points: int):
     if points <= 0:
         return await ctx.send("points must be a positive number.")
@@ -1163,6 +1162,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         await ctx.send(f"{member.mention} promoted to {final_rank} | total merits: {new_total}.")
     else:
         await ctx.send(f"{member.mention} awarded {points_to_add} merits | total merits: {new_total}.")
+
     
 @bot.command()
 async def leaderboard(ctx):
