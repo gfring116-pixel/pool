@@ -1088,7 +1088,7 @@ async def awardpoints(ctx, member: discord.Member, amount: int):
         await ctx.send("Required columns ('Name', 'Merits', 'Rank') not found in sheet.")
         return
 
-    records = main_sheet.get_all_records()
+    records = main_sheet.get_all_records(head=header_row, expected_headers=["Name", "Merits", "Rank"])
     row_number = None
     for i, row in enumerate(records, start=header_row + 1):  # skip headers
         if row["Name"].strip().lower() == roblox_name.lower():
