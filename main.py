@@ -1070,109 +1070,62 @@ def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
 
 @bot.command()
+@commands.has_any_role(*[discord.utils.get(bot.guilds[0].roles, id=role_id).name for role_id in HOST_ROLES])
 async def awardpoints(ctx, member: discord.Member, points: int):
-    if points <= 0:
-        return await ctx.send("points must be a positive number.")
+    spreadsheet = sh.worksheet("Merits")
+    data = spreadsheet.get_all_values()
+    headers = data[0]
+    name_col = headers.index("Name") + 1
+    merits_col = headers.index("Merits") + 1
+    rank_col = headers.index("Rank") + 1
 
-    # extract roblox username
-    roblox_username = extract_roblox_name(member.display_name)
-    if roblox_username == "Unknown":
-        return await ctx.send("member has no nickname set.")
+    display_name = member.display_name
+    username = display_name.split(" | ")[-1].strip()
 
-    # pick correct sheet
-    info = get_regiment_info(member)
-    if not info:
-        return await ctx.send("could not determine regiment or unsupported regiment.")
-    sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
+    cell = spreadsheet.find(username)
+    if not cell:
+        await ctx.send(f"{username} not found in spreadsheet.")
+        return
 
-    # locate headers
-    try:
-        name_cell  = sheet.find("Name")
-        merit_cell = sheet.find("Merits")
-        rank_cell  = sheet.find("Rank")
-    except CellNotFound:
-        return await ctx.send("could not find one of: name, merits, rank")
+    row = cell.row
+    current_merits = int(spreadsheet.cell(row, merits_col).value)
+    current_rank_name = spreadsheet.cell(row, rank_col).value
 
-    name_col  = name_cell.col
-    merit_col = merit_cell.col
-    rank_col  = rank_cell.col
+    # Check if user already has a rank role that doesn't match merits
+    user_roles = [role.id for role in member.roles]
+    existing_rank = next((rank for threshold, rank, abbr, role_id in reversed(RANKS) if role_id in user_roles), None)
+    existing_threshold = next((threshold for threshold, rank, abbr, role_id in RANKS if rank == existing_rank), 0)
 
-    # find row for user
-    data_start = name_cell.row + 1
-    col_vals   = sheet.col_values(name_col)[data_start-1:]
-    try:
-        idx = col_vals.index(roblox_username)
-    except ValueError:
-        return await ctx.send(f"user {roblox_username} not found in sheet")
-    row = data_start + idx
+    if current_merits < existing_threshold:
+        current_merits = existing_threshold
 
-    # read current merits
-    try:
-        current_merits = int(sheet.cell(row, merit_col).value)
-    except (ValueError, TypeError):
-        current_merits = 0
+    new_merits = current_merits + points
+    spreadsheet.update_cell(row, merits_col, new_merits)
 
-    # find current rank role
-    member_role_ids = {r.id for r in member.roles}
-    highest = None
-    for req, rname, abbr, role_id in reversed(RANKS):
-        if role_id in member_role_ids:
-            highest = (req, rname, abbr, role_id)
-            break
-    if not highest:
-        return await ctx.send(f"user {roblox_username} has no rank role")
-    req_merits, current_name, current_abbr, _ = highest
-
-    # calculate points to add
-    if current_merits < req_merits:
-        points_to_add = (req_merits - current_merits) + points
-    else:
-        points_to_add = points
-    new_total = current_merits + points_to_add
-    sheet.update_cell(row, merit_col, new_total)
-
-    # check for promotion
-    new_rank = None
-    for req, rname, abbr, role_id in reversed(RANKS):
-        if new_total >= req and role_id not in member_role_ids:
-            new_rank = (rname, abbr, role_id)
+    new_rank_name, new_rank_abbr, new_rank_role_id = RANKS[0][1:]
+    for threshold, rank_name, abbr, role_id in reversed(RANKS):
+        if new_merits >= threshold:
+            new_rank_name = rank_name
+            new_rank_abbr = abbr
+            new_rank_role_id = role_id
             break
 
-    # rebuild roles without old rank roles
-    old_ids = {r[3] for r in RANKS}
-    cleaned_roles = [r for r in member.roles if r.id not in old_ids]
-    if new_rank:
-        rank_name, rank_abbr, rank_role_id = new_rank
-        cleaned_roles.append(ctx.guild.get_role(rank_role_id))
-        sheet.update_cell(row, rank_col, rank_name)
-        final_abbr = rank_abbr
+    spreadsheet.update_cell(row, rank_col, new_rank_name)
+
+    cleaned_roles = [role for role in member.roles if role.id not in [r[3] for r in RANKS] and role.id not in REGIMENT_ROLES]
+
+    regiment_abbr = next((abbr for role_id, abbr in REGIMENT_ROLES.items() if discord.utils.get(ctx.guild.roles, id=role_id) in member.roles), None)
+
+    if regiment_abbr:
+        new_nick = f"{{{regiment_abbr}}} {new_rank_abbr.lower()} | {username}"
     else:
-        final_abbr = current_abbr
+        new_nick = f"{new_rank_abbr.lower()} | {username}"
 
-    # determine regiment abbreviation
-    regiment_abbr = None
-    for role in member.roles:
-        if role.id in REGIMENT_ROLES:
-            regiment_abbr = REGIMENT_ROLES[role.id]
-            break
-    if not regiment_abbr:
-        regiment_abbr = "unk"
+    cleaned_roles.append(discord.utils.get(ctx.guild.roles, id=new_rank_role_id))
+    await member.edit(roles=cleaned_roles, nick=new_nick[:32])
 
-    # format nickname as "{4TH} CPL | Teto"
-    raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
-    new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
+    await ctx.send(f"awarded {points} points to {username}, now has {new_merits} merits and rank {new_rank_name.lower()}")
 
-    # apply roles and nickname
-    try:
-        await member.edit(roles=cleaned_roles, nick=new_nick)
-    except discord.Forbidden:
-        await ctx.send("could not update member roles or nickname: missing permissions")
-
-    # confirmation
-    if new_rank:
-        await ctx.send(f"{member.mention} promoted to {final_abbr} | total merits: {new_total}")
-    else:
-        await ctx.send(f"{member.mention} awarded {points_to_add} merits | total merits: {new_total}")
 
 
     
