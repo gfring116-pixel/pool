@@ -1083,7 +1083,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     roblox_username = member.display_name.split()[-1].strip()
 
     # Load the sheet
-    worksheet = sheet.worksheet("Merit")
+    worksheet = sheet.worksheet("Merits")
     data = worksheet.get_all_values()
     sheet_data = [row for row in data if any(cell.strip() for cell in row)]
 
