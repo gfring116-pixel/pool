@@ -1070,77 +1070,69 @@ def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
 
 @bot.command()
-async def awardpoints(ctx, user_input: str, amount: int):
-    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
-        return await ctx.send("You do not have permission.")
+async def awardpoints(ctx, member: discord.Member, points: int):
+    # Check if user has a valid rank role
+    user_roles = [role.id for role in member.roles]
+    has_rank_role = any(role_id in user_roles for _, _, _, role_id in RANKS)
 
-    if amount <= 0:
-        return await ctx.send("Amount must be positive.")
+    if not has_rank_role:
+        await ctx.send("This user is a high rank and cannot be awarded merits.")
+        return
 
-    member = await resolve_member(ctx, user_input)
-    if not member:
-        return await ctx.send(f"User `{user_input}` not found.")
+    # Get Roblox username from last part of display name
+    roblox_username = member.display_name.split()[-1].strip()
 
-    member_roles = [role.id for role in member.roles]
-    rank_role_ids = [role_id for _, _, _, role_id in RANKS]
+    # Load the sheet
+    worksheet = sheet.worksheet("Merit")
+    data = worksheet.get_all_values()
+    sheet_data = [row for row in data if any(cell.strip() for cell in row)]
 
-    if not any(role_id in member_roles for role_id in rank_role_ids):
-        return await ctx.send(f"{member.display_name} has a higher rank and cannot be awarded points.")
-
-    roblox_username = extract_roblox_name(member.display_name)
-
-    sheet = main_sheet if get_regiment(member) != "MP" else special_sheet
-    sheet_data = sheet.get_all_values()
-
+    # Try to find the user in the sheet
     name_row = None
     for i, row in enumerate(sheet_data):
-        if len(row) >= 3 and row[0].strip().lower() == roblox_username.lower():
+        if row[0].strip().lower() == roblox_username.lower():
             name_row = i
             break
 
-    def get_rank_from_merit(merit):
-        for min_points, rank_name, short, role_id in reversed(RANKS):
-            if merit >= min_points:
-                return rank_name, short, role_id, min_points
-        return "Recruit", "RCT", RANKS[0][3], 0
+    # If not found, add user to sheet
+    if name_row is None:
+        current_rank = "Recruit"
+        current_rank_code = "RCT"
+        current_merits = 0
+        worksheet.append_row([roblox_username, points, current_rank])
+        await ctx.send(f"Added {roblox_username} with {points} merits and rank {current_rank_code}.")
+        return
 
-    if name_row is not None:
-        import re
+    # Found user — update points and check rank
+    current_merits = int(sheet_data[name_row][1])
+    current_rank = sheet_data[name_row][2]
 
-    raw_merits = str(sheet_data[name_row][1]).replace(",", "")  # Remove commas
-    if re.match(r"^\d+(\.\d+)?(e[+-]?\d+)?$", raw_merits.lower()):
-        current_merits = int(float(raw_merits))  # Handles scientific notation safely
-    else:
-        return await ctx.send(f"Invalid merit value for `{member.display_name}`: `{raw_merits}`")
-        current_rank = sheet_data[name_row][2]
-        _, _, _, current_rank_min = next(((minp, n, s, rid) for minp, n, s, rid in RANKS if n == current_rank), (0, "Recruit", "RCT", RANKS[0][3]))
+    # Get current rank info
+    current_rank_data = next((r for r in RANKS if r[1] == current_rank), RANKS[0])
+    current_rank_points = current_rank_data[0]
 
-        # Adjust if rank is higher than merits
-        if current_merits < current_rank_min:
-            current_merits = current_rank_min
+    # Add back minimum points of current rank if user somehow has fewer
+    if current_merits < current_rank_points:
+        current_merits = current_rank_points
 
-        total_merits = current_merits + amount
-        rank_name, short, role_id, _ = get_rank_from_merit(total_merits)
+    # Add points
+    new_total = current_merits + points
 
-        # Update all values
-        sheet.update(f"A{name_row+1}:C{name_row+1}", [[roblox_username, total_merits, rank_name]])
-        cell = rowcol_to_a1(name_row + 1, 1)
-        sheet.update_note(cell, f"Discord ID: {member.id}")
+    # Determine new rank based on new total
+    new_rank = current_rank
+    new_rank_code = current_rank_data[2]
+    for min_points, rank_name, short_code, role_id in reversed(RANKS):
+        if new_total >= min_points:
+            new_rank = rank_name
+            new_rank_code = short_code
+            break
 
-        # Update role
-        await update_discord_rank(member, role_id)
+    # Update sheet
+    worksheet.update_cell(name_row + 1, 2, new_total)  # Column B = Merits
+    worksheet.update_cell(name_row + 1, 3, new_rank)   # Column C = Rank
 
-        return await ctx.send(f"{roblox_username} now has {total_merits} points and is ranked {rank_name}.")
+    await ctx.send(f"{roblox_username} now has {new_total} merits and rank {new_rank_code}.")
 
-    else:
-        rank_name, short, role_id, _ = get_rank_from_merit(amount)
-        sheet.append_row([roblox_username, amount, rank_name])
-        cell = rowcol_to_a1(len(sheet_data) + 1, 1)
-        sheet.update_note(cell, f"Discord ID: {member.id}")
-
-        await update_discord_rank(member, role_id)
-
-        return await ctx.send(f"{roblox_username} added to sheet with {amount} points and rank {rank_name}.")
 
 
 @bot.command()
