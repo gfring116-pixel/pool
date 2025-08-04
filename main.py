@@ -1342,6 +1342,61 @@ async def selfpromote(ctx):
     )
     await ctx.send(embed=embed)
 
+@bot.command()
+@commands.has_any_role(*HOST_ROLES)
+async def sync(ctx):
+    for sheet in (main_sheet, special_sheet):
+        # locate headers
+        try:
+            name_cell  = sheet.find("Name")
+            merit_cell = sheet.find("Merits")
+            rank_cell  = sheet.find("Rank")
+        except CellNotFound:
+            continue
+
+        name_col, merit_col, rank_col = name_cell.col, merit_cell.col, rank_cell.col
+        data_start = name_cell.row + 1
+
+        # iterate each row of data
+        rows = sheet.get_all_values()[data_start:]
+        for idx, vals in enumerate(rows, start=data_start):
+            username = vals[name_col-1].strip()
+            if not username:
+                continue
+
+            # lookup member by roblox username
+            member = next(
+                (m for m in ctx.guild.members
+                 if extract_roblox_name(m.display_name) == username),
+                None
+            )
+            if not member:
+                continue
+
+            # current sheet merits
+            try:
+                current = int(sheet.cell(idx, merit_col).value)
+            except (ValueError, TypeError):
+                current = 0
+
+            # find their discord rank role & threshold
+            user_role_ids = {r.id for r in member.roles}
+            rank_item = next(
+                (item for item in reversed(RANKS) if item[3] in user_role_ids),
+                None
+            )
+            if rank_item:
+                threshold, rank_name, rank_abbr, role_id = rank_item
+                # bump merits if below threshold
+                if current < threshold:
+                    current = threshold
+                    sheet.update_cell(idx, merit_col, current)
+                # write rank into sheet
+                sheet.update_cell(idx, rank_col, rank_name)
+
+    await ctx.send("sync complete")
+
+
 # ========== BEGIN ENLIST SYSTEM MERGE ==========
 
 AUTHORIZED_ROLES = {1255061914732597268, 1382604947924979793, 1279450222287655023, 1134711656811855942}
