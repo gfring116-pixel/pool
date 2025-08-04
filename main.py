@@ -1346,7 +1346,7 @@ async def selfpromote(ctx):
 @commands.has_any_role(*HOST_ROLES)
 async def sync(ctx):
     for sheet in (main_sheet, special_sheet):
-        # locate headers
+        # find the headers anywhere
         try:
             name_cell  = sheet.find("Name")
             merit_cell = sheet.find("Merits")
@@ -1356,45 +1356,49 @@ async def sync(ctx):
 
         name_col, merit_col, rank_col = name_cell.col, merit_cell.col, rank_cell.col
         data_start = name_cell.row + 1
-
-        # iterate each row of data
         rows = sheet.get_all_values()[data_start:]
-        for idx, vals in enumerate(rows, start=data_start):
-            username = vals[name_col-1].strip()
+
+        for i, row_vals in enumerate(rows, start=data_start):
+            username = row_vals[name_col-1].strip()
             if not username:
                 continue
 
-            # lookup member by roblox username
+            # match member by roblox username (case-insensitive)
             member = next(
                 (m for m in ctx.guild.members
-                 if extract_roblox_name(m.display_name) == username),
+                 if extract_roblox_name(m.display_name).lower() == username.lower()),
                 None
             )
             if not member:
+                # no user found, skip
                 continue
 
-            # current sheet merits
+            # current merits in sheet
             try:
-                current = int(sheet.cell(idx, merit_col).value)
+                current = int(row_vals[merit_col-1])
             except (ValueError, TypeError):
                 current = 0
 
-            # find their discord rank role & threshold
-            user_role_ids = {r.id for r in member.roles}
-            rank_item = next(
-                (item for item in reversed(RANKS) if item[3] in user_role_ids),
-                None
+            # if user already has a rank role above their merits, bump merits
+            user_roles = {r.id for r in member.roles}
+            existing_threshold = next(
+                (thr for thr, _, _, rid in RANKS if rid in user_roles),
+                0
             )
-            if rank_item:
-                threshold, rank_name, rank_abbr, role_id = rank_item
-                # bump merits if below threshold
-                if current < threshold:
-                    current = threshold
-                    sheet.update_cell(idx, merit_col, current)
-                # write rank into sheet
-                sheet.update_cell(idx, rank_col, rank_name)
+            if current < existing_threshold:
+                current = existing_threshold
+                sheet.update_cell(i, merit_col, current)
+
+            # determine correct rank by merits
+            threshold, rank_name, rank_abbr, role_id = next(
+                (item for item in reversed(RANKS) if current >= item[0]),
+                RANKS[0]
+            )
+            # write rank name into sheet
+            sheet.update_cell(i, rank_col, rank_name)
 
     await ctx.send("sync complete")
+
 
 
 # ========== BEGIN ENLIST SYSTEM MERGE ==========
