@@ -1081,6 +1081,12 @@ async def awardpoints(ctx, user_input: str, amount: int):
     if not member:
         return await ctx.send(f"User `{user_input}` not found.")
 
+    member_roles = [role.id for role in member.roles]
+    rank_role_ids = [role_id for _, _, _, role_id in RANKS]
+
+    if not any(role_id in member_roles for role_id in rank_role_ids):
+        return await ctx.send(f"{member.display_name} has a higher rank and cannot be awarded points.")
+
     roblox_username = extract_roblox_name(member.display_name)
 
     sheet = main_sheet if get_regiment(member) != "MP" else special_sheet
