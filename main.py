@@ -1070,78 +1070,51 @@ def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
 
 @bot.command()
-@commands.has_any_role(*HOST_ROLES)
-async def awardpoints(ctx, member: discord.Member, points: int):
-    # Load Google Sheets credentials from environment variable
-    import os
-    import json
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-
-    creds_json = os.getenv("GOOGLE_CREDENTIALS")
-    if not creds_json:
-        await ctx.send("Google credentials not found.")
+async def awardpoints(ctx, member: discord.Member, amount: int):
+    if not any(role.id in HOST_ROLES for role in ctx.author.roles):
+        await ctx.send("You don't have permission to award merits.")
         return
 
-    creds_dict = json.loads(creds_json)
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    gc = gspread.authorize(creds)
+    roblox_name = extract_roblox_name(member.display_name)
 
+    headers = main_sheet.row_values(1)
     try:
-        sheet = gc.open("__1ST VANGUARD DIVISION MERIT DATA__")
-        worksheet = sheet.sheet1
-        special_worksheet = sheet.worksheet("Points Tracker")
-    except Exception as e:
-        await ctx.send(f"Failed to access sheet: {e}")
+        name_col = headers.index("Name") + 1
+        merit_col = headers.index("Merits") + 1
+        rank_col = headers.index("Rank") + 1
+    except ValueError:
+        await ctx.send("Required columns ('Name', 'Merits', 'Rank') not found in sheet.")
         return
 
-    # Extract Roblox name
-    roblox_name = member.display_name.split()[-1]
-
-    # Check if member already has a tracked rank role
-    member_roles = [role.id for role in member.roles]
-    tracked_roles = [role[3] for role in RANKS]
-    has_rank = any(role in member_roles for role in tracked_roles)
-
-    if not has_rank:
-        await ctx.send(f"{member.mention} is a high rank. Point awarding blocked.")
-        return
-
-    # Decide worksheet
-    if any(role.id in member_roles for role in REGIMENT_ROLE_IDS):
-        active_sheet = special_worksheet
-    else:
-        active_sheet = worksheet
-
-    # Find row by name
-    try:
-        cell = active_sheet.find(roblox_name)
-        row = cell.row
-        current_points = int(active_sheet.cell(row, 2).value)
-        new_points = current_points + points
-        active_sheet.update_cell(row, 2, new_points)
-    except:
-        # Add new row
-        active_sheet.append_row([roblox_name, points])
-        new_points = points
-
-    # Rank promotion logic
-    new_rank = None
-    for value, _, _, role_id in reversed(RANKS):
-        if new_points >= value:
-            new_rank = role_id
+    records = main_sheet.get_all_records()
+    row_number = None
+    for i, row in enumerate(records, start=2):  # skip headers
+        if row["Name"].strip().lower() == roblox_name.lower():
+            row_number = i
             break
 
-    if new_rank:
-        try:
-            await member.remove_roles(*[discord.Object(id=r) for r in tracked_roles if r != new_rank])
-            await member.add_roles(discord.Object(id=new_rank))
-        except Exception as e:
-            await ctx.send(f"Promotion failed: {e}")
-            return
+    if row_number:
+        current_merits = int(main_sheet.cell(row_number, merit_col).value)
+        new_merits = current_merits + amount
+        main_sheet.update_cell(row_number, merit_col, new_merits)
+    else:
+        new_merits = amount
+        row_number = len(records) + 2
+        main_sheet.insert_row([roblox_name, new_merits, RANKS[0][1]], row_number)
 
-    await ctx.send(f"Added {points} points to **{roblox_name}**. Total now: **{new_points}**.")
+    # Determine new rank
+    new_rank = next((rank for rank in reversed(RANKS) if new_merits >= rank[0]), RANKS[0])
+    current_rank = main_sheet.cell(row_number, rank_col).value
+
+    # Update rank if needed
+    if current_rank != new_rank[1]:
+        main_sheet.update_cell(row_number, rank_col, new_rank[1])
+        current_roles = [role for role in member.roles if role.id in [r[3] for r in RANKS]]
+        await member.remove_roles(*current_roles)
+        await member.add_roles(ctx.guild.get_role(new_rank[3]))
+
+    await ctx.send(f"{roblox_name} now has {new_merits} merits. Rank: {new_rank[1]}")
+
 
 @bot.command()
 async def leaderboard(ctx):
