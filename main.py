@@ -1090,7 +1090,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     try:
         sheet = gc.open("__1ST VANGUARD DIVISION MERIT DATA__")
-        worksheet = sheet.worksheet("Merit")
+        worksheet = sheet.sheet1
         special_worksheet = sheet.worksheet("Points Tracker")
     except Exception as e:
         await ctx.send(f"Failed to access sheet: {e}")
