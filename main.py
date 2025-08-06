@@ -949,7 +949,7 @@ REGIMENT_ROLES = {
     1320153442244886598: "MP",
     1234503490886176849: "6TH",
     1357959629359026267: "3RD",
-    1387191982866038919: "1ST",
+    1387191982866038918919: "1ST",
     1251102603174215750: "4TH",
     1339571735028174919: "1AS"
 }
@@ -983,7 +983,7 @@ def get_regiment_info(member: discord.Member):
         1251102603174215750: ("4TH RIFLE'S INFANTERIE REGIMENT", "main"),
         1320153442244886598: ("MP", "special"),
         1387191982866038919: ("1ST", "special"),
-        1234503490886176849: ("6TH", "special")
+        1234711656811855942: ("6TH", "special")
     }
     for role in member.roles:
         if role.id in role_map:
@@ -1015,47 +1015,45 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     except gspread_exceptions.CellNotFound:
         return await ctx.send("Could not find one of: Name, Merits, Rank headers.")
 
+    # Prepare indices
     name_col = name_cell.col
     merit_col = merit_cell.col
     rank_col = rank_cell.col
     data_start_row = name_cell.row + 1
 
+    # Fetch existing names below header
+    existing_names = sheet.col_values(name_col)[data_start_row-1:]
+
     # Check if user exists
-    col_vals = sheet.col_values(name_col)[data_start_row-1:]
     try:
-        idx = col_vals.index(roblox_username)
+        idx = existing_names.index(roblox_username)
         row = data_start_row + idx
         current_merits = int(sheet.cell(row, merit_col).value or 0)
     except ValueError:
-        # Not found: determine existing threshold
+        # New user: calculate threshold and insert
         member_role_ids = {r.id for r in member.roles}
-        existing_threshold = 0
-        for threshold, rname, abbr, role_id in reversed(RANKS):
-            if role_id in member_role_ids:
-                existing_threshold = threshold
-                break
+        existing_threshold = next((t for t,_,_,rid in RANKS if rid in member_role_ids), 0)
         current_merits = existing_threshold
         new_total = current_merits + points
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
-        # Find next empty row under header
-        existing_names = sheet.col_values(name_col)
-        insert_row = len(existing_names) + 1
+        # Insert immediately under header + existing rows
+        insert_row = data_start_row + len(existing_names)
         sheet.insert_row([roblox_username, new_total, new_rank[1]], index=insert_row)
         row = insert_row
     else:
+        # Existing user: update merits and rank
         new_total = current_merits + points
-        sheet.update_cell(row, merit_col, new_total)
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
+        sheet.update_cell(row, merit_col, new_total)
         sheet.update_cell(row, rank_col, new_rank[1])
 
-    # Clean old rank roles and apply new
-    member_role_ids = {r.id for r in member.roles}
+    # Role cleanup and assignment
     old_role_ids = {r[3] for r in RANKS}
     cleaned_roles = [r for r in member.roles if r.id not in old_role_ids]
     cleaned_roles.append(ctx.guild.get_role(new_rank[3]))
     final_abbr = new_rank[2]
 
-    # Update nickname: swap only the rank
+    # Nickname update: swap only rank
     original_nick = member.nick or member.display_name
     pattern = r"^(\{.*?\})\s+\S+\s+\|\s+(.+)$"
     match = re.match(pattern, original_nick)
@@ -1063,11 +1061,11 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         regiment_part, username_part = match.groups()
         raw_nick = f"{regiment_part} {final_abbr} | {username_part}"
     else:
-        regiment_abbr = next((abbr for rid, abbr in REGIMENT_ROLES.items() if rid in member_role_ids), "UNK")
+        regiment_abbr = next((abbr for rid, abbr in REGIMENT_ROLES.items() if rid in member.roles), "UNK")
         raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
-    new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
+    new_nick = raw_nick[:32]
 
-    # Apply changes
+    # Apply edits
     if ctx.guild.me.top_role <= member.top_role:
         return await ctx.send("Cannot edit member: role hierarchy")
     try:
@@ -1075,8 +1073,8 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     except discord.Forbidden:
         return await ctx.send("Could not update member roles or nickname: missing permissions")
 
+    # Confirmation
     await ctx.send(f"Awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}")
-
     
 @bot.command()
 async def leaderboard(ctx):
