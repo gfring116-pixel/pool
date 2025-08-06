@@ -1171,7 +1171,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     else:
         final_abbr = existing_rank[1] if existing_rank else RANKS[0][2]
 
-# Keep original nickname format, only swap the rank
+# Update nickname: only change the rank part
 original_nick = member.nick or member.display_name
 import re
 
@@ -1184,11 +1184,20 @@ if match:
     raw_nick = f"{regiment_part} {final_abbr} | {username_part}"
 else:
     # fallback if nickname format is not standard
-    regiment_abbr = next((abbr for rid, abbr in REGIMENT_ROLES.items() if rid in member_role_ids), None) or "unk"
+    regiment_abbr = next((abbr for rid, abbr in REGIMENT_ROLES.items() if rid in member.roles), "UNK")
     raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
 
-# Truncate if needed
 new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
+
+# Apply nickname and roles
+if ctx.guild.me.top_role <= member.top_role:
+    await ctx.send("cannot edit member: role hierarchy")
+else:
+    try:
+        await member.edit(roles=cleaned_roles, nick=new_nick)
+    except discord.Forbidden:
+        await ctx.send("could not update member roles or nickname: missing permissions")
+
 
     if ctx.guild.me.top_role <= member.top_role:
         await ctx.send("cannot edit member: role hierarchy")
