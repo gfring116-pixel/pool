@@ -1120,7 +1120,6 @@ async def awardpoints(ctx, member: discord.Member, points: int):
                 break
 
         current_merits = existing_threshold
-        row = len(sheet.get_all_values()) + 1
         new_total = current_merits + points
 
         # Determine new rank based on updated merits
@@ -1130,12 +1129,18 @@ async def awardpoints(ctx, member: discord.Member, points: int):
                 new_rank = (rname, abbr, role_id)
                 break
 
-        # Append new row
-        sheet.append_row([
+        # Find next empty row under header
+        existing_names = sheet.col_values(name_col)
+        insert_row = len(existing_names) + 1  # +1 because list is 0-indexed but Sheets is 1-indexed
+
+        sheet.insert_row([
             roblox_username,
             new_total,
             new_rank[0] if new_rank else existing_rank[0] if existing_rank else RANKS[0][1]
-        ])
+        ], index=insert_row)
+
+        row = insert_row  # So rank update logic below still works
+
     else:
         # USER FOUND → Update their merits
         new_total = current_merits + points
