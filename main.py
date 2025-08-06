@@ -1036,8 +1036,14 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         current_merits = existing_threshold
         new_total = current_merits + points
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
-        # Insert immediately under header + existing rows
-        insert_row = data_start_row + len(existing_names)
+        # Find first empty slot in Name column under header
+        insert_row = None
+        for i, name in enumerate(existing_names):
+            if not name.strip():
+                insert_row = data_start_row + i
+                break
+        if insert_row is None:
+            insert_row = data_start_row + len(existing_names)
         sheet.insert_row([roblox_username, new_total, new_rank[1]], index=insert_row)
         row = insert_row
     else:
@@ -1075,6 +1081,11 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     # Confirmation
     await ctx.send(f"Awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}")
+
+# Run bot
+discord_bot_token = os.getenv("DISCORD_TOKEN")
+bot.run(discord_bot_token)
+
     
 @bot.command()
 async def leaderboard(ctx):
