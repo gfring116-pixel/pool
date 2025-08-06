@@ -1171,9 +1171,24 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     else:
         final_abbr = existing_rank[1] if existing_rank else RANKS[0][2]
 
+# Keep original nickname format, only swap the rank
+original_nick = member.nick or member.display_name
+import re
+
+# Match: {REGIMENT} RANK | USERNAME
+pattern = r"^(\{.*?\})\s+\S+\s+\|\s+(.+)$"
+match = re.match(pattern, original_nick)
+
+if match:
+    regiment_part, username_part = match.groups()
+    raw_nick = f"{regiment_part} {final_abbr} | {username_part}"
+else:
+    # fallback if nickname format is not standard
     regiment_abbr = next((abbr for rid, abbr in REGIMENT_ROLES.items() if rid in member_role_ids), None) or "unk"
     raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
-    new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
+
+# Truncate if needed
+new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
 
     if ctx.guild.me.top_role <= member.top_role:
         await ctx.send("cannot edit member: role hierarchy")
