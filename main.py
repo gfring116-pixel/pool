@@ -920,7 +920,7 @@ import re
 import discord
 from discord.ext import commands
 import gspread
-from gspread.exceptions import CellNotFound
+import gspread.exceptions as gspread_exceptions
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
@@ -983,7 +983,7 @@ def get_regiment_info(member: discord.Member):
         1251102603174215750: ("4TH RIFLE'S INFANTERIE REGIMENT", "main"),
         1320153442244886598: ("MP", "special"),
         1387191982866038919: ("1ST", "special"),
-        1234711656811855942: ("6TH", "special")
+        1234503490886176849: ("6TH", "special")
     }
     for role in member.roles:
         if role.id in role_map:
@@ -1012,7 +1012,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         name_cell = sheet.find("Name")
         merit_cell = sheet.find("Merits")
         rank_cell = sheet.find("Rank")
-    except CellNotFound:
+    except gspread_exceptions.CellNotFound:
         return await ctx.send("Could not find one of: Name, Merits, Rank headers.")
 
     name_col = name_cell.col
