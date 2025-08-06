@@ -1081,11 +1081,6 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     # Confirmation
     await ctx.send(f"Awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}")
-
-# Run bot
-discord_bot_token = os.getenv("DISCORD_TOKEN")
-bot.run(discord_bot_token)
-
     
 @bot.command()
 async def leaderboard(ctx):
