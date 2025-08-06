@@ -1075,93 +1075,101 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     if points <= 0:
         return await ctx.send("points must be a positive number.")
 
-    # extract roblox username
     roblox_username = extract_roblox_name(member.display_name)
     if roblox_username == "Unknown":
         return await ctx.send("member has no nickname set.")
 
-    # determine regiment and sheet
     info = get_regiment_info(member)
     if not info:
         return await ctx.send("could not determine regiment or unsupported regiment.")
     sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
 
-    # locate header cells anywhere
+    # locate header cells
     try:
         name_cell  = sheet.find("Name")
         merit_cell = sheet.find("Merits")
         rank_cell  = sheet.find("Rank")
-    except CellNotFound:
+    except gspread.exceptions.CellNotFound:
         return await ctx.send("could not find one of: name, merits, rank")
 
-    # derive header positions
     name_col  = name_cell.col
     merit_col = merit_cell.col
     rank_col  = rank_cell.col
-
-    # find user row
     data_start = name_cell.row + 1
-    col_vals   = sheet.col_values(name_col)[data_start-1:]
+
+    col_vals = sheet.col_values(name_col)[data_start-1:]
     try:
         idx = col_vals.index(roblox_username)
+        row = data_start + idx
+
+        try:
+            current_merits = int(sheet.cell(row, merit_col).value)
+        except (ValueError, TypeError):
+            current_merits = 0
+
     except ValueError:
-        return await ctx.send(f"user {roblox_username} not found in sheet")
-    row = data_start + idx
+        # USER NOT FOUND → Append them to the sheet
+        member_role_ids = {r.id for r in member.roles}
+        existing_rank = None
+        existing_threshold = 0
 
-    # read current merits and rank
-    try:
-        current_merits = int(sheet.cell(row, merit_col).value)
-    except (ValueError, TypeError):
-        current_merits = 0
-    current_rank_name = sheet.cell(row, rank_col).value
+        for threshold, rname, abbr, role_id in reversed(RANKS):
+            if role_id in member_role_ids:
+                existing_rank = (rname, abbr, role_id)
+                existing_threshold = threshold
+                break
 
-    # determine user's existing rank role and threshold
+        current_merits = existing_threshold
+        row = len(sheet.get_all_values()) + 1
+        new_total = current_merits + points
+
+        # Determine new rank based on updated merits
+        new_rank = None
+        for threshold, rname, abbr, role_id in reversed(RANKS):
+            if new_total >= threshold:
+                new_rank = (rname, abbr, role_id)
+                break
+
+        # Append new row
+        sheet.append_row([
+            roblox_username,
+            new_total,
+            new_rank[0] if new_rank else existing_rank[0] if existing_rank else RANKS[0][1]
+        ])
+    else:
+        # USER FOUND → Update their merits
+        new_total = current_merits + points
+        sheet.update_cell(row, merit_col, new_total)
+
+        new_rank = None
+        for threshold, rname, abbr, role_id in reversed(RANKS):
+            if new_total >= threshold:
+                new_rank = (rname, abbr, role_id)
+                break
+
+        if new_rank:
+            sheet.update_cell(row, rank_col, new_rank[0])
+
+    # Update Discord roles and nickname
     member_role_ids = {r.id for r in member.roles}
     existing_rank = None
-    existing_threshold = 0
     for threshold, rname, abbr, role_id in reversed(RANKS):
         if role_id in member_role_ids:
             existing_rank = (rname, abbr, role_id)
-            existing_threshold = threshold
             break
 
-    # auto-fix merits to match existing rank if too low
-    if existing_rank and current_merits < existing_threshold:
-        current_merits = existing_threshold
-
-    # add awarded points
-    new_total = current_merits + points
-    sheet.update_cell(row, merit_col, new_total)
-
-    # determine new rank based on updated merits
-    new_rank = None
-    for threshold, rname, abbr, role_id in reversed(RANKS):
-        if new_total >= threshold:
-            new_rank = (rname, abbr, role_id)
-            break
-
-    # update rank cell
-    if new_rank:
-        sheet.update_cell(row, rank_col, new_rank[0])
-
-    # rebuild roles list: remove old rank roles, keep others
     old_ids = {r[3] for r in RANKS}
     cleaned_roles = [r for r in member.roles if r.id not in old_ids]
-    # add new rank role
     if new_rank:
         cleaned_roles.append(ctx.guild.get_role(new_rank[2]))
         final_abbr = new_rank[1]
     else:
         final_abbr = existing_rank[1] if existing_rank else RANKS[0][2]
 
-    # format regiment abbreviation
     regiment_abbr = next((abbr for rid, abbr in REGIMENT_ROLES.items() if rid in member_role_ids), None) or "unk"
-
-    # build nickname {4TH} CPL | Teto
     raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
     new_nick = raw_nick if len(raw_nick) <= 32 else raw_nick[:32]
 
-    # apply changes with permission check
     if ctx.guild.me.top_role <= member.top_role:
         await ctx.send("cannot edit member: role hierarchy")
     else:
@@ -1170,7 +1178,6 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         except discord.Forbidden:
             await ctx.send("could not update member roles or nickname: missing permissions")
 
-    # confirmation
     await ctx.send(
         f"awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}"
     )
