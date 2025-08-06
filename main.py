@@ -916,13 +916,14 @@ async def enlist(ctx, *, member_input=None):
 
 import os
 import json
+import re
 import discord
 from discord.ext import commands
 import gspread
+from gspread.exceptions import CellNotFound
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-from gspread.utils import rowcol_to_a1
 
 load_dotenv()
 
@@ -931,18 +932,18 @@ intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Debug logger
-def log_debug(ctx, message):
-    print(f"[DEBUG] [{ctx.command.name}] {ctx.author} ({ctx.author.id}): {message}")
-
 # Google Sheets Setup
 credentials_str = os.getenv("GOOGLE_CREDENTIALS")
 creds_dict = json.loads(credentials_str)
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 main_sheet = client.open("__1ST VANGUARD DIVISION MERIT DATA__").sheet1
 special_sheet = client.open("Points Tracker").sheet1
+
 # Role IDs for regiments
 REGIMENT_ROLES = {
     1320153442244886598: "MP",
@@ -960,114 +961,35 @@ HOST_ROLES = {
     1279450222287655023
 }
 
-# Ranks
+# Ranks (threshold, full name, abbreviation, role ID)
 RANKS = [
-    (0, "Recruit", "RCT", 1207981849528246282),
-    (15, "SOLDAT", "SOLDAT", 1214438109173907546),
-    (65, "Corporal", "CPL", 1208374047994281985),
-    (150, "Junior Sergeant", "JSGT", 1225058657507606600),
-    (275, "Sergeant", "SGT", 1207980351826173962),
-    (385, "Staff Sergeant", "SSGT", 1214438711379370034),
-    (555, "Sergeant Major", "SMJ", 1207980354317844521),
-    (700, "Master Sergeant", "MSGT", 1214438714508312596)
+    (0,   "Recruit",         "RCT",   1207981849528246282),
+    (15,  "Soldat",          "SOLDAT",1214438109173907546),
+    (65,  "Corporal",        "CPL",   1208374047994281985),
+    (150, "Junior Sergeant", "JSGT",  1225058657507606600),
+    (275, "Sergeant",        "SGT",   1207980351826173962),
+    (385, "Staff Sergeant",  "SSGT",  1214438711379370034),
+    (555, "Sergeant Major",  "SMJ",   1207980354317844521),
+    (700, "Master Sergeant", "MSGT",  1214438714508312596)
 ]
-
-def get_regiment(member):
-    for role in member.roles:
-        if role.id in REGIMENT_ROLES:
-            return REGIMENT_ROLES[role.id]
-    return "Officer"
-
-def get_rank(points):
-    current_rank = RANKS[0]
-    for rank in RANKS:
-        if points >= rank[0]:
-            current_rank = rank
-    return current_rank
-
-def extract_roblox_name(display_name):
-    return display_name.split()[-1] if display_name else "Unknown"
-
-def update_points(user_id, username, points_to_add):
-    records = sheet.get_all_records()
-    now = datetime.utcnow()
-    current_month = now.strftime("%Y-%m")
-
-    for i, row in enumerate(records, start=2):
-        if str(row.get("User ID")) == str(user_id):
-            total = int(row["Total Points"]) + points_to_add
-            monthly_key = f"{current_month} Points"
-            if monthly_key not in row:
-                sheet.update_cell(1, len(row) + 1, monthly_key)
-                row[monthly_key] = 0
-            new_monthly = int(row.get(monthly_key, 0)) + points_to_add
-            sheet.update_cell(i, 3, total)
-            sheet.update_cell(i, list(row.keys()).index(monthly_key) + 1, new_monthly)
-            return total, new_monthly
-
-    sheet.append_row([str(user_id), str(username), points_to_add])
-    return points_to_add, points_to_add
-
-async def resolve_member(ctx, input_str):
-    guild = ctx.guild
-    print(f"[DEBUG] Resolving: {input_str}")
-
-    try:
-        # Mention
-        if input_str.startswith("<@") and input_str.endswith(">"):
-            user_id = int(input_str.strip("<@!>"))
-            member = await guild.fetch_member(user_id)
-            print(f"[DEBUG] Resolved via mention → {member}")
-            return member
-
-        # ID
-        if input_str.isdigit():
-            member = await guild.fetch_member(int(input_str))
-            print(f"[DEBUG] Resolved via ID → {member}")
-            return member
-
-        # Username or Display Name
-        input_lower = input_str.lower()
-        for member in guild.members:
-            if (str(member).lower() == input_lower or
-                member.name.lower() == input_lower or
-                member.display_name.lower() == input_lower):
-                print(f"[DEBUG] Resolved via name → {member}")
-                return member
-
-    except discord.NotFound:
-        print(f"[DEBUG] Member not found: {input_str}")
-        return None
-    except Exception as e:
-        print(f"[resolve_member error] {e}")
-        return None
-
-    print(f"[DEBUG] No match: {input_str}")
-    return None
-
-def get_regiment_info(member):
-    role_map = {
-        1339571735028174919: ("1ST AIRFORCE SQUADRON", "main"),   # 1AS
-        1357959629359026267: ("3RD IMPERIAL INFANTRY REGIMENT", "main"),   # 3RD
-        1251102603174215750: ("4TH RIFLE'S INFANTERIE REGIMENT", "main"),  # 4TH
-        1320153442244886598: ("MP", "special"),                            # MP
-        1387191982866038919: ("1ST", "special"),                           # 1ST
-        1234503490886176849: ("6TH", "special")                            # 6TH
-    }
-
-    for role in member.roles:
-        if role.id in role_map:
-            header, sheet_type = role_map[role.id]
-            return {
-                "header": header,
-                "sheet_type": sheet_type,
-                "regiment": role.name
-            }
-
-    return None  # Officer or unassigned
 
 def extract_roblox_name(nickname: str) -> str:
     return nickname.split()[-1] if nickname else "Unknown"
+
+def get_regiment_info(member: discord.Member):
+    role_map = {
+        1339571735028174919: ("1ST AIRFORCE SQUADRON", "main"),
+        1357959629359026267: ("3RD IMPERIAL INFANTRY REGIMENT", "main"),
+        1251102603174215750: ("4TH RIFLE'S INFANTERIE REGIMENT", "main"),
+        1320153442244886598: ("MP", "special"),
+        1387191982866038919: ("1ST", "special"),
+        1234711656811855942: ("6TH", "special")
+    }
+    for role in member.roles:
+        if role.id in role_map:
+            header, sheet_type = role_map[role.id]
+            return {"header": header, "sheet_type": sheet_type, "regiment": role.name}
+    return None
 
 @bot.command()
 @commands.has_any_role(*HOST_ROLES)
@@ -1082,6 +1004,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     info = get_regiment_info(member)
     if not info:
         return await ctx.send("Could not determine regiment or unsupported regiment.")
+
     sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
 
     # Locate headers
@@ -1089,7 +1012,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         name_cell = sheet.find("Name")
         merit_cell = sheet.find("Merits")
         rank_cell = sheet.find("Rank")
-    except gspread.exceptions.CellNotFound:
+    except CellNotFound:
         return await ctx.send("Could not find one of: Name, Merits, Rank headers.")
 
     name_col = name_cell.col
@@ -1112,7 +1035,6 @@ async def awardpoints(ctx, member: discord.Member, points: int):
                 existing_threshold = threshold
                 break
         current_merits = existing_threshold
-        # Calculate new total and rank
         new_total = current_merits + points
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
         # Find next empty row under header
@@ -1121,7 +1043,6 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         sheet.insert_row([roblox_username, new_total, new_rank[1]], index=insert_row)
         row = insert_row
     else:
-        # Found: update merits and rank
         new_total = current_merits + points
         sheet.update_cell(row, merit_col, new_total)
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
@@ -1129,7 +1050,6 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     # Clean old rank roles and apply new
     member_role_ids = {r.id for r in member.roles}
-    existing_rank = next((r for r in reversed(RANKS) if r[3] in member_role_ids), None)
     old_role_ids = {r[3] for r in RANKS}
     cleaned_roles = [r for r in member.roles if r.id not in old_role_ids]
     cleaned_roles.append(ctx.guild.get_role(new_rank[3]))
@@ -1149,14 +1069,14 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     # Apply changes
     if ctx.guild.me.top_role <= member.top_role:
-        await ctx.send("Cannot edit member: role hierarchy")
-    else:
-        try:
-            await member.edit(roles=cleaned_roles, nick=new_nick)
-        except discord.Forbidden:
-            await ctx.send("Could not update member roles or nickname: missing permissions")
+        return await ctx.send("Cannot edit member: role hierarchy")
+    try:
+        await member.edit(roles=cleaned_roles, nick=new_nick)
+    except discord.Forbidden:
+        return await ctx.send("Could not update member roles or nickname: missing permissions")
 
     await ctx.send(f"Awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}")
+
     
 @bot.command()
 async def leaderboard(ctx):
