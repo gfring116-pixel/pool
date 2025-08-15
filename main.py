@@ -101,13 +101,21 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
 
-    # Locate headers
+    # Locate headers (robust)
     try:
         name_cell = sheet.find("Name")
+    except gspread_exceptions.CellNotFound:
+        return await ctx.send("❌ Could not find header `Name` in the sheet. Check header spelling/placement.")
+
+    try:
         merit_cell = sheet.find("Merits")
+    except gspread_exceptions.CellNotFound:
+        return await ctx.send("❌ Could not find header `Merits` in the sheet. Check header spelling/placement.")
+
+    try:
         rank_cell = sheet.find("Rank")
     except gspread_exceptions.CellNotFound:
-        return await ctx.send("Could not find one of: Name, Merits, Rank headers.")
+        return await ctx.send("❌ Could not find header `Rank` in the sheet. Check header spelling/placement.")
 
     # Prepare indices
     name_col = name_cell.col
