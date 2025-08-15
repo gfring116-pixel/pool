@@ -123,91 +123,99 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         idx = existing_names.index(roblox_username)
         row = data_start_row + idx
         current_merits = int(sheet.cell(row, merit_col).value or 0)
-# ===== Abuse detection & logging (existing user) =====
-now = datetime.utcnow()
-log_channel = ctx.guild.get_channel(LOG_CHANNEL_ID)
-key = (ctx.author.id, member.id)
 
-# Append this award to the recent history and keep only last hour
-recent_awards[key].append((points, now))
-recent_awards[key] = [(p, t) for p, t in recent_awards[key] if now - t <= timedelta(hours=1)]
+        # ===== Abuse detection & logging (existing user) =====
+        now = datetime.utcnow()
+        log_channel = ctx.guild.get_channel(LOG_CHANNEL_ID)
+        key = (ctx.author.id, member.id)
 
-abuse_reasons = []
+        # Append this award to the recent history and keep only last hour
+        recent_awards[key].append((points, now))
+        recent_awards[key] = [(p, t) for p, t in recent_awards[key] if now - t <= timedelta(hours=1)]
 
-# Rule 1: single award too large
-if points > MAX_POINTS_SINGLE_AWARD:
-    abuse_reasons.append(f"{points} points in one award (limit {MAX_POINTS_SINGLE_AWARD})")
+        abuse_reasons = []
 
-# Rule 2: instant promotion (only treat as suspicious if single award > 40)
-next_rank_threshold = next((thr for thr, _, _, _ in RANKS if thr > current_merits), None)
-if next_rank_threshold and current_merits < next_rank_threshold <= current_merits + points and points > 40:
-    abuse_reasons.append(f"instant promotion to {next_rank_threshold} merits")
+        # Rule 1: single award too large
+        if points > MAX_POINTS_SINGLE_AWARD:
+            abuse_reasons.append(f"{points} points in one award (limit {MAX_POINTS_SINGLE_AWARD})")
 
-# Rule 3: too many points in the last hour from same giver -> same receiver
-total_hourly = sum(p for p, _ in recent_awards[key])
-if total_hourly > MAX_POINTS_HOURLY:
-    abuse_reasons.append(f"{total_hourly} points in last hour (limit {MAX_POINTS_HOURLY})")
+        # Rule 2: instant promotion (only treat as suspicious if single award > 40)
+        next_rank_threshold = next((thr for thr, _, _, _ in RANKS if thr > current_merits), None)
+        if next_rank_threshold and current_merits < next_rank_threshold <= current_merits + points and points > 40:
+            abuse_reasons.append(f"instant promotion to {next_rank_threshold} merits")
 
-# Log to the configured channel
-if log_channel:
-    if abuse_reasons:
-        await log_channel.send(
-            f"⚠️ **Potential abuse detected**\n"
-            f"Giver: {ctx.author} ({ctx.author.id})\n"
-            f"Receiver: {member} ({member.id}) / Roblox: {roblox_username}\n"
-            f"Points: {points}\n"
-            f"Reasons: {', '.join(abuse_reasons)}\n"
-            f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
-        )
-    else:
-        await log_channel.send(
-            f"📜 {ctx.author} awarded **{points}** merits to **{roblox_username}** "
-            f"at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC."
-        )
-# ===== end existing-user logging =====
+        # Rule 3: too many points in the last hour from same giver -> same receiver
+        total_hourly = sum(p for p, _ in recent_awards[key])
+        if total_hourly > MAX_POINTS_HOURLY:
+            abuse_reasons.append(f"{total_hourly} points in last hour (limit {MAX_POINTS_HOURLY})")
+
+        # Log to the configured channel
+        if log_channel:
+            if abuse_reasons:
+                await log_channel.send(
+                    f"⚠️ **Potential abuse detected**\n"
+                    f"Giver: {ctx.author} ({ctx.author.id})\n"
+                    f"Receiver: {member} ({member.id}) / Roblox: {roblox_username}\n"
+                    f"Points: {points}\n"
+                    f"Reasons: {', '.join(abuse_reasons)}\n"
+                    f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                )
+            else:
+                await log_channel.send(
+                    f"📜 {ctx.author} awarded **{points}** merits to **{roblox_username}** "
+                    f"at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC."
+                )
+        # ===== end existing-user logging =====
+
+        # Existing user: update merits and rank
+        new_total = current_merits + points
+        new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
+        sheet.update_cell(row, merit_col, new_total)
+        sheet.update_cell(row, rank_col, new_rank[1])
 
     except ValueError:
         # New user: calculate threshold and insert
         member_role_ids = {r.id for r in member.roles}
         existing_threshold = next((t for t,_,_,rid in RANKS if rid in member_role_ids), 0)
         current_merits = existing_threshold
-# ===== Abuse detection & logging (new user) =====
-now = datetime.utcnow()
-log_channel = ctx.guild.get_channel(LOG_CHANNEL_ID)
-key = (ctx.author.id, member.id)
 
-recent_awards[key].append((points, now))
-recent_awards[key] = [(p, t) for p, t in recent_awards[key] if now - t <= timedelta(hours=1)]
+        # ===== Abuse detection & logging (new user) =====
+        now = datetime.utcnow()
+        log_channel = ctx.guild.get_channel(LOG_CHANNEL_ID)
+        key = (ctx.author.id, member.id)
 
-abuse_reasons = []
+        recent_awards[key].append((points, now))
+        recent_awards[key] = [(p, t) for p, t in recent_awards[key] if now - t <= timedelta(hours=1)]
 
-if points > MAX_POINTS_SINGLE_AWARD:
-    abuse_reasons.append(f"{points} points in one award (limit {MAX_POINTS_SINGLE_AWARD})")
+        abuse_reasons = []
 
-next_rank_threshold = next((thr for thr, _, _, _ in RANKS if thr > current_merits), None)
-if next_rank_threshold and current_merits < next_rank_threshold <= current_merits + points and points > 40:
-    abuse_reasons.append(f"instant promotion to {next_rank_threshold} merits")
+        if points > MAX_POINTS_SINGLE_AWARD:
+            abuse_reasons.append(f"{points} points in one award (limit {MAX_POINTS_SINGLE_AWARD})")
 
-total_hourly = sum(p for p, _ in recent_awards[key])
-if total_hourly > MAX_POINTS_HOURLY:
-    abuse_reasons.append(f"{total_hourly} points in last hour (limit {MAX_POINTS_HOURLY})")
+        next_rank_threshold = next((thr for thr, _, _, _ in RANKS if thr > current_merits), None)
+        if next_rank_threshold and current_merits < next_rank_threshold <= current_merits + points and points > 40:
+            abuse_reasons.append(f"instant promotion to {next_rank_threshold} merits")
 
-if log_channel:
-    if abuse_reasons:
-        await log_channel.send(
-            f"⚠️ **Potential abuse detected**\n"
-            f"Giver: {ctx.author} ({ctx.author.id})\n"
-            f"Receiver: {member} ({member.id}) / Roblox: {roblox_username}\n"
-            f"Points: {points}\n"
-            f"Reasons: {', '.join(abuse_reasons)}\n"
-            f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
-        )
-    else:
-        await log_channel.send(
-            f"📜 {ctx.author} awarded **{points}** merits to **{roblox_username}** "
-            f"at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC."
-        )
-# ===== end new-user logging =====
+        total_hourly = sum(p for p, _ in recent_awards[key])
+        if total_hourly > MAX_POINTS_HOURLY:
+            abuse_reasons.append(f"{total_hourly} points in last hour (limit {MAX_POINTS_HOURLY})")
+
+        if log_channel:
+            if abuse_reasons:
+                await log_channel.send(
+                    f"⚠️ **Potential abuse detected**\n"
+                    f"Giver: {ctx.author} ({ctx.author.id})\n"
+                    f"Receiver: {member} ({member.id}) / Roblox: {roblox_username}\n"
+                    f"Points: {points}\n"
+                    f"Reasons: {', '.join(abuse_reasons)}\n"
+                    f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                )
+            else:
+                await log_channel.send(
+                    f"📜 {ctx.author} awarded **{points}** merits to **{roblox_username}** "
+                    f"at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC."
+                )
+        # ===== end new-user logging =====
 
         new_total = current_merits + points
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
@@ -221,12 +229,6 @@ if log_channel:
             insert_row = data_start_row + len(existing_names)
         sheet.insert_row([roblox_username, new_total, new_rank[1]], index=insert_row)
         row = insert_row
-    else:
-        # Existing user: update merits and rank
-        new_total = current_merits + points
-        new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
-        sheet.update_cell(row, merit_col, new_total)
-        sheet.update_cell(row, rank_col, new_rank[1])
 
     # Role cleanup and assignment
     old_role_ids = {r[3] for r in RANKS}
