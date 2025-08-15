@@ -88,17 +88,6 @@ def get_regiment_info(member: discord.Member):
 @bot.command()
 @commands.has_any_role(*HOST_ROLES)
 async def awardpoints(ctx, member: discord.Member, points: int):
-    """
-    Awards merits to a Roblox user, logs the award to LOG_CHANNEL_ID and runs abuse detection.
-    Requires at top-level:
-      - LOG_CHANNEL_ID (int)
-      - MAX_POINTS_SINGLE_AWARD (int)
-      - MAX_POINTS_HOURLY (int)
-      - recent_awards (defaultdict(list))
-      - RANKS, REGIMENT_ROLES, main_sheet, special_sheet
-      - extract_roblox_name(), get_regiment_info()
-      - imports: datetime (for datetime.utcnow), timedelta, gspread_exceptions
-    """
     if points <= 0:
         return await ctx.send("Points must be a positive number.")
 
@@ -112,60 +101,17 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
 
-    # ===== Robust locate headers (fallbacks + helpful error) =====
-    def _make_cell_like(r, c):
-        class _C:
-            def __init__(self, row, col):
-                self.row = row
-                self.col = col
-        return _C(r, c)
+    # Locate headers
+    try:
+        name_cell = sheet.find("Name")
+        merit_cell = sheet.find("Merits")
+        rank_cell = sheet.find("Rank")
+    except gspread_exceptions.CellNotFound:
+        return await ctx.send("Could not find one of: Name, Merits, Rank headers.")
 
-    def find_header_cell(sheet_obj, header_name, max_rows_lookup=5):
-        # Try exact find first
-        try:
-            cell = sheet_obj.find(header_name)
-            if cell:
-                return cell
-        except gspread_exceptions.CellNotFound:
-            pass
-        except Exception:
-            # fallback scan if find throws something unexpected
-            pass
-
-        # Fallback: scan top rows, case-insensitive trimmed match
-        try:
-            rows = sheet_obj.get_all_values()[:max_rows_lookup]
-        except Exception:
-            return None
-
-        for r_idx, row in enumerate(rows, start=1):
-            for c_idx, val in enumerate(row, start=1):
-                if isinstance(val, str) and val.strip().lower() == header_name.strip().lower():
-                    return _make_cell_like(r_idx, c_idx)
-        return None
-
-    name_cell = find_header_cell(sheet, "Name")
-    merit_cell = find_header_cell(sheet, "Merits")
-    rank_cell = find_header_cell(sheet, "Rank")
-
+    # Defensive: if find returned None for any header, stop with helpful message
     if not (name_cell and merit_cell and rank_cell):
-        try:
-            first_row = sheet.row_values(1)
-        except Exception:
-            first_row = ["<could not read first row>"]
-        missing = []
-        if not name_cell:
-            missing.append("Name")
-        if not merit_cell:
-            missing.append("Merits")
-        if not rank_cell:
-            missing.append("Rank")
-        return await ctx.send(
-            f"❌ Could not find header(s): {', '.join(missing)} in the sheet.\n"
-            f"Sheet first row (for debugging): `{first_row}`\n"
-            "Make sure headers exactly match (no extra spaces, correct capitalization)."
-        )
-    # ===== end header locate =====
+        return await ctx.send("Could not locate one of the headers: Name, Merits, Rank. Check sheet headers.")
 
     # Prepare indices
     name_col = name_cell.col
@@ -176,103 +122,20 @@ async def awardpoints(ctx, member: discord.Member, points: int):
     # Fetch existing names below header
     existing_names = sheet.col_values(name_col)[data_start_row - 1 :]
 
-    # Helper: log to configured channel (best-effort)
-    now = datetime.utcnow()
-    log_channel = ctx.guild.get_channel(LOG_CHANNEL_ID)
-
-    # Check if user exists in sheet
+    # Check if user exists
     try:
         idx = existing_names.index(roblox_username)
         row = data_start_row + idx
         current_merits = int(sheet.cell(row, merit_col).value or 0)
-
-        # ===== Abuse detection & logging (existing user) =====
-        key = (ctx.author.id, member.id)
-        recent_awards[key].append((points, now))
-        # Keep only last hour
-        recent_awards[key] = [(p, t) for p, t in recent_awards[key] if now - t <= timedelta(hours=1)]
-
-        abuse_reasons = []
-        # Rule 1: single award too large
-        if points > MAX_POINTS_SINGLE_AWARD:
-            abuse_reasons.append(f"{points} points in one award (limit {MAX_POINTS_SINGLE_AWARD})")
-
-        # Rule 2: instant promotion suspicious if the award itself is fairly large (>40)
-        next_rank_threshold = next((thr for thr, _, _, _ in RANKS if thr > current_merits), None)
-        if next_rank_threshold and current_merits < next_rank_threshold <= current_merits + points and points > 40:
-            abuse_reasons.append(f"instant promotion to {next_rank_threshold} merits")
-
-        # Rule 3: too many points in last hour from same giver to same receiver
-        total_hourly = sum(p for p, _ in recent_awards[key])
-        if total_hourly > MAX_POINTS_HOURLY:
-            abuse_reasons.append(f"{total_hourly} points in last hour (limit {MAX_POINTS_HOURLY})")
-
-        # Log
-        if log_channel:
-            if abuse_reasons:
-                await log_channel.send(
-                    f"⚠️ **Potential abuse detected**\n"
-                    f"Giver: {ctx.author} ({ctx.author.id})\n"
-                    f"Receiver: {member} ({member.id}) / Roblox: {roblox_username}\n"
-                    f"Points: {points}\n"
-                    f"Reasons: {', '.join(abuse_reasons)}\n"
-                    f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
-                )
-            else:
-                await log_channel.send(
-                    f"📜 {ctx.author} awarded **{points}** merits to **{roblox_username}** "
-                    f"at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC."
-                )
-        # ===== end existing-user logging =====
-
-        # Update sheet for existing user
-        new_total = current_merits + points
-        new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
-        sheet.update_cell(row, merit_col, new_total)
-        sheet.update_cell(row, rank_col, new_rank[1])
-
     except ValueError:
         # New user: calculate threshold and insert
         member_role_ids = {r.id for r in member.roles}
         existing_threshold = next((t for t, _, _, rid in RANKS if rid in member_role_ids), 0)
         current_merits = existing_threshold
 
-        # ===== Abuse detection & logging (new user) =====
-        key = (ctx.author.id, member.id)
-        recent_awards[key].append((points, now))
-        recent_awards[key] = [(p, t) for p, t in recent_awards[key] if now - t <= timedelta(hours=1)]
-
-        abuse_reasons = []
-        if points > MAX_POINTS_SINGLE_AWARD:
-            abuse_reasons.append(f"{points} points in one award (limit {MAX_POINTS_SINGLE_AWARD})")
-
-        next_rank_threshold = next((thr for thr, _, _, _ in RANKS if thr > current_merits), None)
-        if next_rank_threshold and current_merits < next_rank_threshold <= current_merits + points and points > 40:
-            abuse_reasons.append(f"instant promotion to {next_rank_threshold} merits")
-
-        total_hourly = sum(p for p, _ in recent_awards[key])
-        if total_hourly > MAX_POINTS_HOURLY:
-            abuse_reasons.append(f"{total_hourly} points in last hour (limit {MAX_POINTS_HOURLY})")
-
-        if log_channel:
-            if abuse_reasons:
-                await log_channel.send(
-                    f"⚠️ **Potential abuse detected**\n"
-                    f"Giver: {ctx.author} ({ctx.author.id})\n"
-                    f"Receiver: {member} ({member.id}) / Roblox: {roblox_username}\n"
-                    f"Points: {points}\n"
-                    f"Reasons: {', '.join(abuse_reasons)}\n"
-                    f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
-                )
-            else:
-                await log_channel.send(
-                    f"📜 {ctx.author} awarded **{points}** merits to **{roblox_username}** "
-                    f"at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC."
-                )
-        # ===== end new-user logging =====
-
         new_total = current_merits + points
         new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
+
         # Find first empty slot in Name column under header
         insert_row = None
         for i, name in enumerate(existing_names):
@@ -281,8 +144,15 @@ async def awardpoints(ctx, member: discord.Member, points: int):
                 break
         if insert_row is None:
             insert_row = data_start_row + len(existing_names)
+
         sheet.insert_row([roblox_username, new_total, new_rank[1]], index=insert_row)
         row = insert_row
+    else:
+        # Existing user: update merits and rank
+        new_total = current_merits + points
+        new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
+        sheet.update_cell(row, merit_col, new_total)
+        sheet.update_cell(row, rank_col, new_rank[1])
 
     # Role cleanup and assignment
     old_role_ids = {r[3] for r in RANKS}
@@ -303,7 +173,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
         # determine regiment abbreviation from roles
         regiment_abbr = "UNK"
         for rid, abbr in REGIMENT_ROLES.items():
-            if any(r.id == rid for r in member.roles):
+            if any(role.id == rid for role in member.roles):
                 regiment_abbr = abbr
                 break
         raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
@@ -319,7 +189,7 @@ async def awardpoints(ctx, member: discord.Member, points: int):
 
     # Confirmation
     await ctx.send(f"Awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}")
-    
+
 @bot.command()
 async def leaderboard(ctx):
     try:
