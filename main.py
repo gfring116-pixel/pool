@@ -57,13 +57,13 @@ HOST_ROLES = {
 
 # Ranks (threshold, full name, abbreviation, role ID)
 RANKS = [
-    (0,   "Recruit",         "RCT",   1207981849528246282),
+    (0,   "Recruit",         "Recruit",   1207981849528246282),
     (15,  "Soldat",          "SOLDAT",1214438109173907546),
     (65,  "Corporal",        "CPL",   1208374047994281985),
-    (150, "Junior Sergeant", "JSGT",  1225058657507606600),
+    (150, "Junior Sergeant", "SGT",  1225058657507606600),
     (275, "Sergeant",        "SGT",   1207980351826173962),
     (385, "Staff Sergeant",  "SSGT",  1214438711379370034),
-    (555, "Sergeant Major",  "SMJ",   1207980354317844521),
+    (555, "Sergeant Major",  "SMGT",   1207980354317844521),
     (700, "Master Sergeant", "MSGT",  1214438714508312596)
 ]
 
