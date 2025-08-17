@@ -123,15 +123,15 @@ async def awardpoints(ctx, *args):
             )
 
         if not member:
-            results.append(f"❌ Could not find member: `{input_str}`")
+            results.append(f"Could not find member: `{input_str}`")
             continue
 
         # --- your existing award logic moved into a helper function ---
         try:
             msg = await process_award(ctx, member, points)
-            results.append(f"✅ {msg}")
+            results.append(f"{msg}")
         except Exception as e:
-            results.append(f"❌ Error processing {member.display_name}: {e}")
+            results.append(f"Error processing {member.display_name}: {e}")
 
     await ctx.send("\n".join(results))
 
