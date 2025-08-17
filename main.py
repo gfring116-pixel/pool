@@ -84,13 +84,19 @@ def get_regiment_info(member: discord.Member):
             header, sheet_type = role_map[role.id]
             return {"header": header, "sheet_type": sheet_type, "regiment": role.name}
     return None
-
+    
 @bot.command()
 @commands.has_any_role(*HOST_ROLES)
 async def awardpoints(ctx, *args):
+    """
+    Usage: !awardpoints <member...> <points>
+    Members can be mentions, IDs, or usernames/display names (space-separated).
+    The last argument must be the integer points to award.
+    """
     if len(args) < 2:
         return await ctx.send("Usage: `!awardpoints <member...> <points>`")
 
+    # parse points (last argument)
     try:
         points = int(args[-1])
     except ValueError:
@@ -99,26 +105,39 @@ async def awardpoints(ctx, *args):
     if points <= 0:
         return await ctx.send("Points must be a positive number.")
 
-    # All arguments except the last are members/usernames/IDs
     member_inputs = args[:-1]
-
     results = []
+
+    # Pre-map mentions for quick lookup (mention text -> Member)
+    mention_map = {}
+    if ctx.message.mentions:
+        for m in ctx.message.mentions:
+            # canonical mention forms
+            mention_map[f"<@{m.id}>"] = m
+            mention_map[f"<@!{m.id}>"] = m
+            mention_map[str(m.id)] = m
+
     for input_str in member_inputs:
         member = None
+        raw = input_str.strip()
 
-        # Try resolving by mention/ID
-        if input_str.isdigit():
-            member = ctx.guild.get_member(int(input_str))
-        elif len(ctx.message.mentions) > 0:
-            # Mentions already resolved by discord.py
-            for m in ctx.message.mentions:
-                if str(m.id) == re.sub(r"[<@!>]", "", input_str):
-                    member = m
-                    break
+        # 1) Direct mention forms or direct ID
+        if raw in mention_map:
+            member = mention_map[raw]
+        else:
+            stripped = re.sub(r"[<@!>]", "", raw)
+            if stripped.isdigit():
+                member = ctx.guild.get_member(int(stripped))
+
+        # 2) Try by exact username / display_name
         if not member:
-            # Try resolving by username/nickname
-            member = discord.utils.find(
-                lambda m: m.name == input_str or m.display_name == input_str,
+            member = find(lambda m: m.name == raw or m.display_name == raw, ctx.guild.members)
+
+        # 3) Try case-insensitive username/display_name partial fallback
+        if not member:
+            lowered = raw.lower()
+            member = find(
+                lambda m: m.name.lower() == lowered or m.display_name.lower() == lowered,
                 ctx.guild.members,
             )
 
@@ -126,18 +145,20 @@ async def awardpoints(ctx, *args):
             results.append(f"Could not find member: `{input_str}`")
             continue
 
-        # --- your existing award logic moved into a helper function ---
         try:
-            msg = await process_award(ctx, member, points)
-            results.append(f"{msg}")
+            msg = await _process_award(ctx, member, points)
+            results.append(msg)
         except Exception as e:
-            results.append(f"Error processing {member.display_name}: {e}")
+            results.append(f"Error processing `{member.display_name}`: {e}")
 
     await ctx.send("\n".join(results))
 
 
-# Move your award logic into a helper so it’s reusable
-async def process_award(ctx, member: discord.Member, points: int):
+async def _process_award(ctx: commands.Context, member: discord.Member, points: int) -> str:
+    """
+    Core logic to award points to a single member and update sheet/roles/nickname.
+    Returns a short status string for that member.
+    """
     roblox_username = extract_roblox_name(member.display_name)
     if roblox_username == "Unknown":
         return f"{member.display_name}: No nickname set."
@@ -146,79 +167,101 @@ async def process_award(ctx, member: discord.Member, points: int):
     if not info:
         return f"{member.display_name}: Unsupported regiment."
 
-    sheet = main_sheet if info["sheet_type"] == "main" else special_sheet
+    sheet = main_sheet if info.get("sheet_type") == "main" else special_sheet
 
-    # Locate headers
+    # Find headers on sheet
     try:
         name_cell = sheet.find("Name")
         merit_cell = sheet.find("Merits")
         rank_cell = sheet.find("Rank")
     except gspread_exceptions.CellNotFound:
-        return f"{member.display_name}: Missing sheet headers."
+        return f"{roblox_username}: Missing sheet headers (Name, Merits, Rank)."
 
     if not (name_cell and merit_cell and rank_cell):
-        return f"{member.display_name}: Could not locate headers."
+        return f"{roblox_username}: Could not locate headers."
 
     name_col, merit_col, rank_col = name_cell.col, merit_cell.col, rank_cell.col
     data_start_row = name_cell.row + 1
-    existing_names = sheet.col_values(name_col)[data_start_row - 1:]
 
+    # Read existing names under header
+    existing_names = sheet.col_values(name_col)[data_start_row - 1 :]
+
+    # find current merits
+    row = None
     try:
         idx = existing_names.index(roblox_username)
         row = data_start_row + idx
         current_merits = int(sheet.cell(row, merit_col).value or 0)
     except ValueError:
+        # Not in DB: use their current Discord role baseline from RANKS
         member_role_ids = {r.id for r in member.roles}
         existing_threshold = next((t for t, _, _, rid in RANKS if rid in member_role_ids), 0)
         current_merits = existing_threshold
         row = None
 
+    # Compute updated total and new rank
     new_total = current_merits + points
     new_rank = next((r for r in reversed(RANKS) if new_total >= r[0]), RANKS[0])
+    new_rank_name = new_rank[1]
+    new_rank_abbr = new_rank[2]
+    new_rank_role_id = new_rank[3]
 
+    # Insert or update sheet
     if row is None:
-        insert_row = next(
-            (data_start_row + i for i, name in enumerate(existing_names) if not name.strip()),
-            data_start_row + len(existing_names),
-        )
-        sheet.insert_row([roblox_username, new_total, new_rank[1]], index=insert_row)
+        # find first empty slot or append
+        insert_row = None
+        for i, name in enumerate(existing_names):
+            if not name or not name.strip():
+                insert_row = data_start_row + i
+                break
+        if insert_row is None:
+            insert_row = data_start_row + len(existing_names)
+        sheet.insert_row([roblox_username, new_total, new_rank_name], index=insert_row)
     else:
         sheet.update_cell(row, merit_col, new_total)
-        sheet.update_cell(row, rank_col, new_rank[1])
+        sheet.update_cell(row, rank_col, new_rank_name)
 
-    # Role cleanup & assignment
-    old_role_ids = {r[3] for r in RANKS}
+    # Update roles: remove old rank roles, append new rank role
+    old_role_ids = {rdef[3] for rdef in RANKS}
     cleaned_roles = [r for r in member.roles if r.id not in old_role_ids]
-    new_role = ctx.guild.get_role(new_rank[3])
-    if new_role:
+
+    new_role = ctx.guild.get_role(new_rank_role_id)
+    if new_role and new_role not in cleaned_roles:
         cleaned_roles.append(new_role)
 
-    final_abbr = new_rank[2]
-    original_nick = member.nick or member.display_name
-    match = re.match(r"^(\{.*?\})\s+\S+\s+\|\s+(.+)$", original_nick)
+    # Nickname handling:
+    # If nickname/displayname matches "{REGIMENT} RANK | Username", only replace the RANK part.
+    original_nick = member.nick or member.display_name or ""
+    pattern = r"^(\{.*?\})\s+\S+\s+\|\s+(.+)$"
+    match = re.match(pattern, original_nick)
 
     if match:
         regiment_part, username_part = match.groups()
-        raw_nick = f"{regiment_part} {final_abbr} | {username_part}"
+        raw_nick = f"{regiment_part} {new_rank_abbr} | {username_part}"
     else:
+        # Fallback: rebuild nickname using detected regiment from roles (if any)
         regiment_abbr = "UNK"
         for rid, abbr in REGIMENT_ROLES.items():
             if any(role.id == rid for role in member.roles):
                 regiment_abbr = abbr
                 break
-        raw_nick = f"{{{regiment_abbr}}} {final_abbr} | {roblox_username}"
+        raw_nick = f"{{{regiment_abbr}}} {new_rank_abbr} | {roblox_username}"
 
-    new_nick = raw_nick[:32]
+    new_nick = raw_nick[:32]  # Discord max nick length
 
+    # Role hierarchy check before editing
     if ctx.guild.me.top_role <= member.top_role:
-        return f"{roblox_username}: Cannot edit (role hierarchy)."
+        # We updated the sheet; but cannot change roles/nick due to hierarchy
+        return f"{roblox_username}: Awarded {points} merits (total {new_total}, rank {new_rank_abbr}) — could not update roles/nickname due to role hierarchy."
 
     try:
         await member.edit(roles=cleaned_roles, nick=new_nick)
     except discord.Forbidden:
-        return f"{roblox_username}: Missing permissions to update."
+        return f"{roblox_username}: Awarded {points} merits (total {new_total}, rank {new_rank_abbr}) — missing permissions to update roles/nickname."
+    except Exception as e:
+        return f"{roblox_username}: Awarded {points} merits (total {new_total}, rank {new_rank_abbr}) — error updating member: {e}"
 
-    return f"Awarded {points} merits to {roblox_username}, total {new_total}, rank {final_abbr}"
+    return f"{roblox_username}: Awarded {points} merits (total {new_total}, rank {new_rank_abbr})"
 
 @bot.command()
 async def leaderboard(ctx):
