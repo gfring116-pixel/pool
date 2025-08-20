@@ -11,10 +11,11 @@ from datetime import datetime
 from datetime import timedelta
 from collections import defaultdict
 import os
-from flask import Flask
 from threading import Thread
+from flask import Flask
 
-app = Flask(__name__)
+# ----------------- Flask for uptime -----------------
+app = Flask("")
 
 @app.route("/")
 def home():
@@ -23,8 +24,8 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
 
+# Run Flask in a separate thread so it won't block the bot
 Thread(target=run_flask).start()
-
 # Abuse logging config
 LOG_CHANNEL_ID = 1314931440496017481
 MAX_POINTS_SINGLE_AWARD = 80
