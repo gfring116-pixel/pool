@@ -770,7 +770,7 @@ async def purgeuser(ctx, roblox_name: str):
         data = sheet.get_all_values()
         for i, row in enumerate(data):
             if row and row[0].strip().lower() == roblox_name.lower():
-                sheet.delete_row(i + 1)
+                sheet.delete_rows(i + 1)
                 return await ctx.send(f"{roblox_name} has been removed from the sheet.")
     await ctx.send(f"{roblox_name} not found in any sheet.")
 
