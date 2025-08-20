@@ -12,10 +12,18 @@ from datetime import timedelta
 from collections import defaultdict
 import os
 from flask import Flask
+from threading import Thread
 
 app = Flask(__name__)
-port = int(os.environ.get("PORT", 5000))
-app.run(host="0.0.0.0", port=port)
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
+
+Thread(target=run_flask).start()
 
 # Abuse logging config
 LOG_CHANNEL_ID = 1314931440496017481
