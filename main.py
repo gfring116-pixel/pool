@@ -245,17 +245,33 @@ async def _process_award(ctx: commands.Context, member: discord.Member, points: 
     if new_role and new_role not in cleaned_roles:
         cleaned_roles.append(new_role)
 
-    # Nickname handling:
-    # If nickname/displayname matches "{REGIMENT} RANK | Username", only replace the RANK part.
+       # Nickname handling:
+    # Cases handled:
+    #  1. "{REGIMENT} RANK | Username"
+    #  2. "[𝓡𝓛] {REGIMENT} RANK | Username"
+    #  3. "[𝓡𝓛] RANK | Username"
+    #  4. "RANK | Username"
     original_nick = member.nick or member.display_name or ""
-    pattern = r"^(\{.*?\})\s+\S+\s+\|\s+(.+)$"
+    pattern = r"^(?:\[𝓡𝓛\]\s*)?(?:\{.*?\}\s+)?(\S+)\s+\|\s+(.+)$"
     match = re.match(pattern, original_nick)
 
     if match:
-        regiment_part, username_part = match.groups()
-        raw_nick = f"{regiment_part} {new_rank_abbr} | {username_part}"
+        # got the captured parts
+        rank_part, username_part = match.groups()
+
+        # keep regiment if present, else fallback
+        regiment_match = re.match(r"^(?:\[𝓡𝓛\]\s*)?(\{.*?\})", original_nick)
+        if regiment_match:
+            regiment_part = regiment_match.group(1)
+        else:
+            regiment_part = "{UNK}"
+
+        # if original had [𝓡𝓛], keep it
+        rl_prefix = "[𝓡𝓛] " if original_nick.strip().startswith("[𝓡𝓛]") else ""
+
+        raw_nick = f"{rl_prefix}{regiment_part} {new_rank_abbr} | {username_part}"
     else:
-        # Fallback: rebuild nickname using detected regiment from roles (if any)
+        # fallback: rebuild from scratch
         regiment_abbr = "UNK"
         for rid, abbr in REGIMENT_ROLES.items():
             if any(role.id == rid for role in member.roles):
@@ -1281,23 +1297,70 @@ async def cleanup_roles(member: discord.Member, keep_role_id: int):
             if role:
                 await member.remove_roles(role)
 
-async def update_nickname(member: discord.Member, new_rank_nick: str):
-    if member.nick:
-        match = re.match(r"(\{.*?\})\s+([^\|]+)\s+\|\s+(.*)", member.nick)
-        if match:
-            regiment, _, username = match.groups()
-            new_nick = f"{regiment} {new_rank_nick} | {username}"
-            try:
-                await member.edit(nick=new_nick)
-            except discord.Forbidden:
-                return False
+async def update_nickname(member: discord.Member, new_rank: str):
+    """
+    robust nickname updater:
+    preserves optional [𝓡𝓛] prefix, optional {REGIMENT}, and username after '|'
+    if regiment missing, inserts {UNK}
+    returns True on success, False on failure (permission/error)
+    """
+    try:
+        raw = (member.nick or member.display_name or "").strip()
+    except Exception:
+        raw = ""
+
+    rl_prefix = ""
+    regiment_part = None
+    username_part = None
+
+    if '|' in raw:
+        left, right = raw.split('|', 1)
+        left = left.strip()
+        username_part = right.strip()
+
+        # detect [𝓡𝓛] prefix (allow no space or a space)
+        m_rl = re.match(r'^\[𝓡𝓛\]\s*(.*)$', left)
+        if m_rl:
+            rl_prefix = "[𝓡𝓛] "
+            left = m_rl.group(1).strip()
+
+        # detect {REGIMENT} if present
+        m_reg = re.match(r'^(\{.*?\})\s*(.*)$', left)
+        if m_reg:
+            regiment_part = m_reg.group(1)
+            # left_after_reg = m_reg.group(2).strip()  # old rank text, unused
     else:
-        new_nick = f"{new_rank_nick} | {member.name}"
-        try:
-            await member.edit(nick=new_nick)
-        except discord.Forbidden:
-            return False
-    return True
+        # no '|' present, attempt to salvage
+        tmp = raw
+        m_rl = re.match(r'^\[𝓡𝓛\]\s*(.*)$', tmp)
+        if m_rl:
+            rl_prefix = "[𝓡𝓛] "
+            tmp = m_rl.group(1).strip()
+
+        m_reg = re.match(r'^(\{.*?\})\s*(.*)$', tmp)
+        if m_reg:
+            regiment_part = m_reg.group(1)
+            username_part = m_reg.group(2).strip() or None
+        else:
+            username_part = tmp or None
+
+    if not username_part:
+        username_part = member.display_name or member.name or "unknown"
+
+    if not regiment_part:
+        regiment_part = "{UNK}"
+
+    new_rank_up = new_rank.upper()
+    new_nick = f"{rl_prefix}{regiment_part} {new_rank_up} | {username_part}"
+    new_nick = new_nick[:32]
+
+    try:
+        await member.edit(nick=new_nick)
+        return True
+    except discord.Forbidden:
+        return False
+    except Exception:
+        return False
 
 async def log_action(ctx, member: discord.Member, action: str, old_rank: str, new_rank: str):
     log_channel = ctx.guild.get_channel(log_channel_id)
@@ -1319,19 +1382,29 @@ async def officer_promote(ctx, member: discord.Member):
     old_rank = ranks[rank_index]
     new_rank = ranks[rank_index + 1]
 
+    # role hierarchy check before attempting role edits
+    if ctx.guild.me.top_role <= member.top_role:
+        await ctx.send(f"cannot change roles/nickname for {member.mention} due to role hierarchy")
+        await log_action(ctx, member, "promoted (attempted - hierarchy)", old_rank["nick"], new_rank["nick"])
+        return
+
+    # remove other rank roles, give new rank
     await cleanup_roles(member, new_rank["role"])
     await member.add_roles(discord.Object(id=new_rank["role"]))
 
+    # ensure extra roles present
     for role_id in extra_roles:
         if not discord.utils.get(member.roles, id=role_id):
             await member.add_roles(discord.Object(id=role_id))
 
+    # update nickname using robust updater
     success = await update_nickname(member, new_rank["nick"])
     if not success:
-        await ctx.send("could not change nickname")
+        await ctx.send(f"could not change nickname for {member.mention}")
 
     await ctx.send(f"{member.mention} promoted to {new_rank['nick']}")
     await log_action(ctx, member, "promoted", old_rank["nick"], new_rank["nick"])
+
 
 @bot.command(name="odemote")
 @commands.has_any_role(*promote_allowed)
@@ -1346,19 +1419,29 @@ async def officer_demote(ctx, member: discord.Member):
     old_rank = ranks[rank_index]
     new_rank = ranks[rank_index - 1]
 
+    # role hierarchy check before attempting role edits
+    if ctx.guild.me.top_role <= member.top_role:
+        await ctx.send(f"cannot change roles/nickname for {member.mention} due to role hierarchy")
+        await log_action(ctx, member, "demoted (attempted - hierarchy)", old_rank["nick"], new_rank["nick"])
+        return
+
+    # remove other rank roles, give new rank
     await cleanup_roles(member, new_rank["role"])
     await member.add_roles(discord.Object(id=new_rank["role"]))
 
+    # ensure extra roles present
     for role_id in extra_roles:
         if not discord.utils.get(member.roles, id=role_id):
             await member.add_roles(discord.Object(id=role_id))
 
+    # update nickname using robust updater
     success = await update_nickname(member, new_rank["nick"])
     if not success:
-        await ctx.send("could not change nickname")
+        await ctx.send(f"could not change nickname for {member.mention}")
 
     await ctx.send(f"{member.mention} demoted to {new_rank['nick']}")
     await log_action(ctx, member, "demoted", old_rank["nick"], new_rank["nick"])
+
 
 @officer_promote.error
 async def opromote_error(ctx, error):
@@ -1369,6 +1452,7 @@ async def opromote_error(ctx, error):
     else:
         raise error
 
+
 @officer_demote.error
 async def odemote_error(ctx, error):
     if isinstance(error, CommandOnCooldown):
@@ -1377,10 +1461,6 @@ async def odemote_error(ctx, error):
         await ctx.send("you dont have permission to use this command")
     else:
         raise error
-
-
-
-
 # Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
