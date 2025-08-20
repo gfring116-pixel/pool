@@ -1476,6 +1476,19 @@ async def odemote_error(ctx, error):
         await ctx.send("you dont have permission to use this command")
     else:
         raise error
+
+@bot.command()
+async def debug(ctx):
+    latency = round(bot.latency * 1000)  # in milliseconds
+    guilds = len(bot.guilds)
+    members = sum(guild.member_count for guild in bot.guilds)
+    await ctx.send(
+        f"Bot is online ✅\n"
+        f"Latency: {latency}ms\n"
+        f"Connected servers: {guilds}\n"
+        f"Total members: {members}"
+    )
+
 # Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
