@@ -1489,6 +1489,14 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
+CHANNEL_ID = 1391264065170571385
+
+@tasks.loop(minutes=5)  # runs every 5 minutes
+async def send_message_loop():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send("I am still online!")
+
 # Run the bot
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
