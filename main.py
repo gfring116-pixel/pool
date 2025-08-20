@@ -84,6 +84,22 @@ def get_regiment_info(member: discord.Member):
             header, sheet_type = role_map[role.id]
             return {"header": header, "sheet_type": sheet_type, "regiment": role.name}
     return None
+
+async def log_award(ctx, giver, receiver, points, total, rank, status):
+    log_channel = ctx.guild.get_channel(LOG_CHANNEL_ID)
+    if log_channel:
+        embed = discord.Embed(
+            title="merit award logged",
+            description=status,
+            color=discord.Color.gold(),
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="given by", value=f"{giver.mention} ({giver.id})", inline=False)
+        embed.add_field(name="given to", value=f"{receiver.mention} ({receiver.id})", inline=False)
+        embed.add_field(name="points awarded", value=str(points), inline=True)
+        embed.add_field(name="new total", value=str(total), inline=True)
+        embed.add_field(name="new rank", value=rank, inline=True)
+        await log_channel.send(embed=embed)
     
 @bot.command()
 @commands.has_any_role(*HOST_ROLES)
