@@ -1232,6 +1232,138 @@ async def on_member_join(member: discord.Member):
         await member.add_roles(*roles_to_add, reason="Role sync from Server A")
         print(f"Assigned roles {roles_to_add} to {member.name}")
 
+import discord
+from discord.ext import commands
+from discord.ext.commands import CommandOnCooldown, cooldown
+import re
+
+# role ids
+promote_allowed = [1382604947924979793, 1134711656811855942]
+extra_roles = [1279450222287655023, 1350321663996330037]
+log_channel_id = 1314931440496017481
+
+# rank structure (ordered lowest to highest)
+ranks = [
+    {"role": 1167334645671657502, "nick": "CDT"},
+    {"role": 1167338203771047986, "nick": "2.LT"},
+    {"role": 1167338264781394011, "nick": "1.LT"},
+    {"role": 1207267583972212757, "nick": "CPT"},
+    {"role": 1208384127418638336, "nick": "MJR"},
+    {"role": 1210550474105819209, "nick": "LTCOL"},
+]
+
+def get_rank_index(member: discord.Member):
+    for i, rank in enumerate(ranks):
+        if discord.utils.get(member.roles, id=rank["role"]):
+            return i
+    return None
+
+async def cleanup_roles(member: discord.Member, keep_role_id: int):
+    for rank in ranks:
+        if rank["role"] != keep_role_id:
+            role = discord.utils.get(member.roles, id=rank["role"])
+            if role:
+                await member.remove_roles(role)
+
+async def update_nickname(member: discord.Member, new_rank_nick: str):
+    if member.nick:
+        match = re.match(r"(\{.*?\})\s+([^\|]+)\s+\|\s+(.*)", member.nick)
+        if match:
+            regiment, _, username = match.groups()
+            new_nick = f"{regiment} {new_rank_nick} | {username}"
+            try:
+                await member.edit(nick=new_nick)
+            except discord.Forbidden:
+                return False
+    else:
+        new_nick = f"{new_rank_nick} | {member.name}"
+        try:
+            await member.edit(nick=new_nick)
+        except discord.Forbidden:
+            return False
+    return True
+
+async def log_action(ctx, member: discord.Member, action: str, old_rank: str, new_rank: str):
+    log_channel = ctx.guild.get_channel(log_channel_id)
+    if log_channel:
+        await log_channel.send(
+            f"{member.mention} was officer {action} from {old_rank} → {new_rank} by {ctx.author.mention}"
+        )
+
+@bot.command(name="opromote")
+@commands.has_any_role(*promote_allowed)
+@cooldown(1, 60, commands.BucketType.user)
+async def officer_promote(ctx, member: discord.Member):
+    rank_index = get_rank_index(member)
+    if rank_index is None:
+        return await ctx.send(f"{member.mention} has no valid rank role")
+    if rank_index == len(ranks) - 1:
+        return await ctx.send(f"{member.mention} is already highest rank")
+
+    old_rank = ranks[rank_index]
+    new_rank = ranks[rank_index + 1]
+
+    await cleanup_roles(member, new_rank["role"])
+    await member.add_roles(discord.Object(id=new_rank["role"]))
+
+    for role_id in extra_roles:
+        if not discord.utils.get(member.roles, id=role_id):
+            await member.add_roles(discord.Object(id=role_id))
+
+    success = await update_nickname(member, new_rank["nick"])
+    if not success:
+        await ctx.send("could not change nickname")
+
+    await ctx.send(f"{member.mention} promoted to {new_rank['nick']}")
+    await log_action(ctx, member, "promoted", old_rank["nick"], new_rank["nick"])
+
+@bot.command(name="odemote")
+@commands.has_any_role(*promote_allowed)
+@cooldown(1, 60, commands.BucketType.user)
+async def officer_demote(ctx, member: discord.Member):
+    rank_index = get_rank_index(member)
+    if rank_index is None:
+        return await ctx.send(f"{member.mention} has no valid rank role")
+    if rank_index == 0:
+        return await ctx.send(f"{member.mention} is already lowest rank")
+
+    old_rank = ranks[rank_index]
+    new_rank = ranks[rank_index - 1]
+
+    await cleanup_roles(member, new_rank["role"])
+    await member.add_roles(discord.Object(id=new_rank["role"]))
+
+    for role_id in extra_roles:
+        if not discord.utils.get(member.roles, id=role_id):
+            await member.add_roles(discord.Object(id=role_id))
+
+    success = await update_nickname(member, new_rank["nick"])
+    if not success:
+        await ctx.send("could not change nickname")
+
+    await ctx.send(f"{member.mention} demoted to {new_rank['nick']}")
+    await log_action(ctx, member, "demoted", old_rank["nick"], new_rank["nick"])
+
+@officer_promote.error
+async def opromote_error(ctx, error):
+    if isinstance(error, CommandOnCooldown):
+        await ctx.send(f"wait {round(error.retry_after)}s before promoting again")
+    elif isinstance(error, commands.MissingAnyRole):
+        await ctx.send("you dont have permission to use this command")
+    else:
+        raise error
+
+@officer_demote.error
+async def odemote_error(ctx, error):
+    if isinstance(error, CommandOnCooldown):
+        await ctx.send(f"wait {round(error.retry_after)}s before demoting again")
+    elif isinstance(error, commands.MissingAnyRole):
+        await ctx.send("you dont have permission to use this command")
+    else:
+        raise error
+
+
+
 
 # Run the bot
 if __name__ == "__main__":
