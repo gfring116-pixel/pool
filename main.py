@@ -1489,6 +1489,8 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
+from discord.ext import tasks
+
 CHANNEL_ID = 1391264065170571385
 
 @tasks.loop(minutes=5)  # runs every 5 minutes
