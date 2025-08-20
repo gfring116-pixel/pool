@@ -10,6 +10,12 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from datetime import timedelta
 from collections import defaultdict
+import os
+from flask import Flask
+
+app = Flask(__name__)
+port = int(os.environ.get("PORT", 5000))
+app.run(host="0.0.0.0", port=port)
 
 # Abuse logging config
 LOG_CHANNEL_ID = 1314931440496017481
