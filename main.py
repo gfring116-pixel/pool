@@ -727,44 +727,52 @@ def is_cheesecake_user():
         return ctx.author.id == CHEESECAKE_USER_ID
     return commands.check(predicate)
 
-@bot.command()
-@commands.is_owner()
-async def forceadd(ctx, roblox_name: str, points: int):
-    """Force add points to any user in the sheets"""
-    for sheet in [main_sheet, special_sheet]:
-        data = sheet.get_all_values()
-        for i, row in enumerate(data):
-            if row and row[0].strip().lower() == roblox_name.lower():
-                total = int(row[1]) + points
-                sheet.update_cell(i + 1, 2, total)
-                return await ctx.send(f"✅ {roblox_name} now has {total} merit points.")
-        # If not found, insert
-        sheet.append_row([roblox_name, points])
-        return await ctx.send(f"✅ {roblox_name} added with {points} points.")
+def extract_number(value):
+    """Extract numeric part from a string, default to 0 if not found."""
+    if not value:
+        return 0
+    match = re.search(r'\d+', str(value))
+    return int(match.group()) if match else 0
 
 @bot.command()
 @commands.is_owner()
-async def purgeuser(ctx, roblox_name: str):
-    """Remove a user from the sheets"""
+async def forceadd(ctx, roblox_name: str, points: int):
+    """Force add points to any user in the sheets."""
     for sheet in [main_sheet, special_sheet]:
         data = sheet.get_all_values()
         for i, row in enumerate(data):
             if row and row[0].strip().lower() == roblox_name.lower():
-                sheet.delete_rows(i + 1)
-                return await ctx.send(f"🗑️ {roblox_name} has been purged from the sheet.")
-    await ctx.send("❌ User not found.")
+                current_merits = extract_number(row[1])
+                total = current_merits + points
+                sheet.update_cell(i + 1, 2, total)
+                return await ctx.send(f"{roblox_name} now has {total} merit points.")
+        # If user not found, append them
+        sheet.append_row([roblox_name, points])
+        return await ctx.send(f"{roblox_name} added with {points} points.")
 
 @bot.command()
 @commands.is_owner()
 async def resetmerit(ctx, roblox_name: str):
-    """Reset a user's merit to 0"""
+    """Reset a user's merits to 0."""
     for sheet in [main_sheet, special_sheet]:
         data = sheet.get_all_values()
         for i, row in enumerate(data):
             if row and row[0].strip().lower() == roblox_name.lower():
                 sheet.update_cell(i + 1, 2, 0)
-                return await ctx.send(f"🔁 {roblox_name}'s merit reset to 0.")
-    await ctx.send("❌ User not found.")
+                return await ctx.send(f"{roblox_name}'s merits have been reset to 0.")
+    await ctx.send(f"{roblox_name} not found in any sheet.")
+
+@bot.command()
+@commands.is_owner()
+async def purgeuser(ctx, roblox_name: str):
+    """Remove a user entirely from the sheets."""
+    for sheet in [main_sheet, special_sheet]:
+        data = sheet.get_all_values()
+        for i, row in enumerate(data):
+            if row and row[0].strip().lower() == roblox_name.lower():
+                sheet.delete_row(i + 1)
+                return await ctx.send(f"{roblox_name} has been removed from the sheet.")
+    await ctx.send(f"{roblox_name} not found in any sheet.")
 
 # Bot owner ID
 BOT_OWNER_ID = {728201873366056992, 940752980989341756}
