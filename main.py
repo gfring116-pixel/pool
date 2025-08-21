@@ -1512,6 +1512,141 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
+import re
+import unicodedata
+from fuzzywuzzy import fuzz
+from better_profanity import profanity
+from discord.ext import commands
+
+# Your replacement dictionary (keep it as-is)
+replacements = {
+    "shit": "shoot", "shits": "shoots", "shitty": "messy",
+    "fuck": "fudge", "fucks": "fudges", "fucking": "freaking", "fucked": "fudged",
+    "damn": "darn", "damned": "darned", "damnit": "darnit",
+    "bitch": "witch", "bitches": "witches", "bitching": "complaining",
+    "ass": "butt", "asses": "butts", "asshole": "meanie", "assholes": "meanies",
+    "bastard": "rascal", "bastards": "rascals",
+    "crap": "crud", "crappy": "cruddy",
+    "hell": "heck", "hells": "hecks",
+    "cunt": "meanie", "cunts": "meanies",
+    "prick": "twig", "pricks": "twigs",
+    "wanker": "clown", "wankers": "clowns",
+    "motherfucker": "motherhugger", "motherfuckers": "motherhuggers",
+    "bullshit": "nonsense", "bullshits": "nonsense", "bullshitting": "lying",
+    "jackass": "donkey", "jackasses": "donkeys",
+    "dumbass": "silly goose", "dumbasses": "silly geese",
+    "piss": "pee", "pisses": "pees", "pissed": "upset", "pissing": "peeing",
+    "bloody": "ruddy",
+    "bugger": "rascal", "buggers": "rascals",
+
+    # --- Genital/body insults ---
+    "dick": "jerk", "dicks": "jerks",
+    "cock": "rooster", "cocks": "roosters",
+    "pussy": "cat", "pussies": "cats",
+    "penis": "banana", "penises": "bananas",
+    "vagina": "peach", "vaginas": "peaches",
+    "boobs": "balloons", "boob": "balloon",
+    "tits": "birds", "tit": "bird",
+    "boner": "oopsie", "boners": "oopsies",
+    "cum": "milk", "cums": "milk", "cumming": "spilling",
+    "jizz": "glue", "jizzes": "glue",
+
+    # --- Sexual insults ---
+    "slut": "partygoer", "sluts": "partygoers",
+    "whore": "worker", "whores": "workers",
+    "jerkoff": "daydream", "jerking": "daydreaming",
+    "masturbate": "meditate", "masturbating": "meditating",
+    "porn": "cartoons", "porno": "cartoon", "pornography": "drawings",
+    "stripper": "dancer", "strippers": "dancers",
+    "hoe": "gardener", "hoes": "gardeners",
+
+    # --- General insults ---
+    "loser": "unlucky one", "losers": "unlucky ones",
+    "idiot": "goof", "idiots": "goofs",
+    "stupid": "silly", "stupids": "sillies",
+    "moron": "dork", "morons": "dorks",
+    "douche": "sponge", "douches": "sponges",
+    "weirdo": "unique one", "weirdos": "unique ones",
+
+    # --- Slurs ---
+    "fag": "friend", "fags": "friends", "faggot": "friend", "faggots": "friends",
+    "nigga": "friend", "niggas": "friends",
+    "nigger": "friend", "niggers": "friends",
+    "retard": "silly", "retards": "sillies", "retarded": "silly",
+    "kike": "person", "kikes": "people",
+    "chink": "dude", "chinks": "dudes",
+    "spic": "pal", "spics": "pals",
+    "gypsy": "traveler", "gypsies": "travelers",
+    "tranny": "person", "trannies": "people",
+    "shemale": "person", "shemales": "people",
+    "dyke": "friend", "dykes": "friends",
+    "queer": "friend", "queers": "friends",
+    "kraut": "person", "krauts": "people",
+    "paki": "person", "pakis": "people",
+    "redskin": "person", "redskins": "people",
+    "cracker": "pal", "crackers": "pals"
+}
+
+charmap = {
+    "$": "s", "5": "s", "@": "a", "4": "a", "1": "i", "!": "i",
+    "3": "e", "0": "o", "7": "t", "*": "", "-": "", ".": ""
+}
+
+# -------------------- Profanity Helpers --------------------
+
+def normalize(text: str) -> str:
+    """Normalize text for profanity matching: lowercase, strip accents, simplify characters."""
+    t = unicodedata.normalize("NFKC", text.lower())
+    t = ''.join(c for c in t if not unicodedata.combining(c))
+    t = ''.join(c for c in t if c.isprintable())
+    for k, v in charmap.items():
+        t = t.replace(k, v)
+    t = re.sub(r'(.)\1+', r'\1', t)       # collapse repeated chars
+    t = re.sub(r'[\s._-]', '', t)         # ✅ fixed dash placement
+    return t
+
+def skeleton(word: str) -> str:
+    """Remove vowels for fuzzy skeleton comparison."""
+    return re.sub(r'[aeiou]', '', word)
+
+def replace_word(word: str) -> str:
+    """Replace a single word if it matches profanity, otherwise return unchanged."""
+    nw = normalize(word)
+
+    # ✅ Exact dictionary replacement (handles lowercase, punctuation, etc.)
+    if nw in replacements:
+        return replacements[nw]
+
+    # ✅ Skip fuzzy matching for short words (<=3 chars) unless exact match was found
+    if len(nw) <= 3:
+        return word
+
+    # ✅ Fuzzy matching for longer words
+    for bad, clean in replacements.items():
+        if fuzz.ratio(nw, bad) >= 80 or fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
+            return clean
+
+    return word
+
+def clean_text(text: str) -> str:
+    """Replace profanity in an entire message."""
+    return " ".join(replace_word(w) for w in text.split())
+
+# -------------------- Debug Command --------------------
+
+@bot.command(name="debugfilter")
+@commands.is_owner()  # only bot owner(s) can run this
+async def debugfilter(ctx, *, text: str):
+    """
+    Debug command to test profanity replacements.
+    Example: !debugfilter cum
+    """
+    cleaned = clean_text(text)
+    await ctx.send(
+        f"Original: `{text}`\n"
+        f"Filtered: `{cleaned}`"
+    )
+
 
 
 # Run the bot
