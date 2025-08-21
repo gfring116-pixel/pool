@@ -1517,6 +1517,33 @@ import unicodedata
 from fuzzywuzzy import fuzz
 from better_profanity import profanity
 from discord.ext import commands
+import json
+import os
+
+WHITELIST_FILE = "whitelist.json"
+
+# Load whitelist from file or default set
+if os.path.exists(WHITELIST_FILE):
+    with open(WHITELIST_FILE, "r") as f:
+        WHITELIST = set(json.load(f))
+else:
+    WHITELIST = {
+    # everyday "cant/cock/class/pass/mass/tit/cum/woah" safe words
+    "cant","cannot","canting","recant","recanting","cantina","cantinas",
+    "chant","chants","enchant","enchanting","enchantment","enchanted","decant","decanting","scant","scanty",
+    "woah","whoa","whoah","wooah",
+    "cocktail","cocktails","cockatoo","cockatoos","cockerel","cocker","cockerel","spaniel","peacock","woodcock","hitchcock",
+    "assistant","assistance","assistants",
+    "class","classes","classic","classics","classroom","classrooms","classification","classifications","classifier","classifiers",
+    "pass","passer","passers","passing","passage","passenger","passengers","compass","surpass","surpassing","trespass","trespassing",
+    "mass","masses","massive","amass","massacre","domain","domains","demand","demands",
+    "title","titles","titled","titan","titanic","titans","tithes",
+    "cumulative","accumulate","accumulating","accumulation","cucumber", "word"
+    }
+
+def save_whitelist():
+    with open(WHITELIST_FILE, "w") as f:
+        json.dump(list(WHITELIST), f, indent=2)
 
 # Your replacement dictionary (keep it as-is)
 replacements = {
@@ -1673,6 +1700,42 @@ async def togglefilter(ctx, state: str = None):
         await ctx.send("❌ Profanity filter is now **OFF**")
     else:
         await ctx.send("⚠️ Use `!togglefilter on` or `!togglefilter off`")
+
+@bot.group(name="whitelist", invoke_without_command=True)
+@commands.is_owner()
+async def whitelist(ctx):
+    """Show whitelist usage if no subcommand used"""
+    await ctx.send("Usage: `!whitelist add <word>` | `!whitelist remove <word>` | `!whitelist list`")
+
+@whitelist.command(name="add")
+@commands.is_owner()
+async def whitelist_add(ctx, word: str):
+    word = word.lower()
+    if word in WHITELIST:
+        await ctx.send(f" `{word}` is already whitelisted")
+    else:
+        WHITELIST.add(word)
+        save_whitelist()
+        await ctx.send(f" Added `{word}` to whitelist")
+
+@whitelist.command(name="remove")
+@commands.is_owner()
+async def whitelist_remove(ctx, word: str):
+    word = word.lower()
+    if word not in WHITELIST:
+        await ctx.send(f" `{word}` is not in the whitelist")
+    else:
+        WHITELIST.remove(word)
+        save_whitelist()
+        await ctx.send(f" Removed `{word}` from whitelist")
+
+@whitelist.command(name="list")
+@commands.is_owner()
+async def whitelist_list(ctx):
+    if not WHITELIST:
+        await ctx.send("Whitelist is empty")
+    else:
+        await ctx.send(" Whitelist:\n" + ", ".join(sorted(WHITELIST)))
 
 
 # Run the bot
