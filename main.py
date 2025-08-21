@@ -1590,6 +1590,7 @@ replacements = {
     "cracker": "pal", "crackers": "pals"
 }
 
+# --- Character normalization ---
 charmap = {
     "$": "s", "5": "s", "§": "s",
     "@": "a", "4": "a", "α": "a", "а": "a",
@@ -1606,29 +1607,35 @@ def normalize(text: str) -> str:
     t = ''.join(c for c in t if c.isprintable())
     for k, v in charmap.items():
         t = t.replace(k, v)
-    t = re.sub(r'(.)\1+', r'\1', t)      # collapse repeating letters
-    t = re.sub(r'[\s-_.]', '', t)        # remove spaces/punctuation
+    t = re.sub(r'(.)\1+', r'\1', t)  # collapse repeated letters
+    t = re.sub(r'[\s-_.]', '', t)    # remove spaces/punctuation
     return t
 
 def skeleton(word: str) -> str:
     return re.sub(r'[aeiou]', '', word)
 
 def replace_word(word: str) -> str:
+    # 1️⃣ Check profanity first on raw word
+    if profanity.contains_profanity(word):
+        return "[friend]"
+
+    # 2️⃣ Normalize for replacements/fuzzy matching
     nw = normalize(word)
     if nw in replacements:
         return replacements[nw]
+
     for bad, clean in replacements.items():
         if fuzz.ratio(nw, bad) >= 80:
             return clean
         if fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
             return clean
-    if profanity.contains_profanity(nw):
-        return "[friend]"
+
     return word
 
 def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
 
+# --- Bot Setup ---
 bot = commands.Bot(command_prefix="!", intents=None)  # put your intents here
 
 @bot.event
@@ -1643,6 +1650,7 @@ async def on_message(msg):
         except discord.Forbidden:
             return
 
+        # Send corrected message via webhook
         hooks = await msg.channel.webhooks()
         hook = discord.utils.get(hooks, name="filter")
         if hook is None:
@@ -1655,7 +1663,6 @@ async def on_message(msg):
         )
 
     await bot.process_commands(msg)
-
 
 
 # Run the bot
