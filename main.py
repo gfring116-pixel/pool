@@ -1641,71 +1641,54 @@ async def debugfilter(ctx, *, text: str):
 async def on_ready():
     log.info(f"Bot ready: {bot.user} (id: {bot.user.id})")
 
-@bot.event
-async def on_message(msg: discord.Message):
-    # Safety: ensure it's a guild message we can inspect
+@bot.listen("on_message")
+async def profanity_filter(msg: discord.Message):
     if msg.author.bot or not msg.guild:
-        await bot.process_commands(msg)
         return
 
-    # Print debug info for every message (comment out later)
-    log.info(f"MSG from {msg.author} ({msg.author.id}) in {msg.channel} — raw content: {repr(msg.content)}")
-
     content = msg.content or ""
-    # 1) Quick message-level profanity detection (catches "fuck" reliably)
     message_flagged = profanity.contains_profanity(content)
-
-    # 2) If not detected at message-level, do word-level checks (fuzzy + replacements)
     cleaned_by_words = clean_text(content)
     words_changed = (cleaned_by_words != content)
 
-    # Decide if we should filter (either message-level flagged OR words changed)
     if not message_flagged and not words_changed:
-        # nothing to do
-        await bot.process_commands(msg)
-        return
+        return  # nothing to filter
 
-    # Build final cleaned message:
-    # If message flagged by profanity, we replace each profane word with [friend] (simple approach)
+    # Build cleaned message
     if message_flagged:
-        # replace each token that profanity flags — simple token-wise approach:
         tokens = content.split()
         replaced_tokens = []
         for t in tokens:
             if profanity.contains_profanity(t):
                 replaced_tokens.append("[friend]")
             else:
-                # apply other replacements/fuzzy if necessary
                 replaced_tokens.append(replace_word(t))
         final = " ".join(replaced_tokens)
     else:
         final = cleaned_by_words
 
-    log.info(f"Filtered result for msg id {msg.id}: {repr(final)}")
-
-    # Try to delete original (but continue whether or not deletion succeeds)
+    # Delete original
     try:
         await msg.delete()
-        log.info("Original message deleted.")
     except discord.Forbidden:
-        log.warning("No permission to delete message; continuing to webhook.")
+        pass
     except Exception as e:
-        log.exception("Unexpected error when deleting message (continuing): %s", e)
+        log.warning(f"Failed to delete message: {e}")
 
-    # Ensure webhook existence and send cleaned message
+    # Send cleaned message via webhook
     try:
         hooks = await msg.channel.webhooks()
         hook = discord.utils.get(hooks, name="filter")
         if hook is None:
             hook = await msg.channel.create_webhook(name="filter")
-        await hook.send(content=final,
-                        username=msg.author.display_name,
-                        avatar_url=getattr(msg.author.avatar, "url", None) if msg.author.avatar else None)
-        log.info("Webhook sent cleaned message.")
+        await hook.send(
+            content=final,
+            username=msg.author.display_name,
+            avatar_url=getattr(msg.author.avatar, "url", None) if msg.author.avatar else None
+        )
     except Exception as e:
-        log.exception("Failed to send webhook: %s", e)
+        log.warning(f"Failed to send webhook: {e}")
 
-    await bot.process_commands(msg)
 
 # Run the bot
 if __name__ == "__main__":
