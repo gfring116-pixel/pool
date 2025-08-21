@@ -1538,6 +1538,11 @@ replacements = {
     "piss": "pee", "pisses": "pees", "pissed": "upset", "pissing": "peeing",
     "bloody": "ruddy",
     "bugger": "rascal", "buggers": "rascals",
+    "fuc": "fudge",
+    "shi": "shoot",
+    "bish": "witch",
+    "assh": "meanie",
+    "dic": "jerk",
 
     # --- Genital/body insults ---
     "dick": "jerk", "dicks": "jerks",
