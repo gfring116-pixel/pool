@@ -1679,6 +1679,42 @@ async def debugfilter(ctx, *, text: str):
         f"Filtered: `{cleaned}`"
     )
 
+@bot.listen("on_message")
+async def profanity_filter(msg: discord.Message):
+    # ignore bots + DMs
+    if msg.author.bot or not msg.guild:
+        return
+
+    content = msg.content or ""
+    cleaned = clean_text(content)
+
+    # if nothing changed, do nothing
+    if cleaned == content:
+        return
+
+    # try to delete original
+    try:
+        await msg.delete()
+    except discord.Forbidden:
+        return  # missing permissions
+    except Exception as e:
+        print(f"Delete failed: {e}")
+        return
+
+    # try to resend cleaned message with webhook
+    try:
+        hooks = await msg.channel.webhooks()
+        hook = discord.utils.get(hooks, name="filter")
+        if hook is None:
+            hook = await msg.channel.create_webhook(name="filter")
+        await hook.send(
+            content=cleaned,
+            username=msg.author.display_name,
+            avatar_url=getattr(msg.author.avatar, "url", None) if msg.author.avatar else None
+        )
+    except Exception as e:
+        print(f"Webhook send failed: {e}")
+
 @bot.command(name="togglefilter")
 @commands.is_owner()
 async def togglefilter(ctx, state: str = None):
@@ -1736,6 +1772,44 @@ async def whitelist_list(ctx):
         await ctx.send("Whitelist is empty")
     else:
         await ctx.send(" Whitelist:\n" + ", ".join(sorted(WHITELIST)))
+
+@bot.group(name="blacklist", invoke_without_command=True)
+@commands.is_owner()
+async def blacklist(ctx):
+    """Show blacklist usage if no subcommand used"""
+    await ctx.send("Usage: `!blacklist add <bad> <replacement>` | `!blacklist remove <bad>` | `!blacklist list`")
+
+@blacklist.command(name="add")
+@commands.is_owner()
+async def blacklist_add(ctx, bad: str, replacement: str):
+    bad = bad.lower()
+    if bad in replacements:
+        await ctx.send(f" `{bad}` is already blacklisted as → `{replacements[bad]}`")
+    else:
+        replacements[bad] = replacement
+        save_blacklist()
+        await ctx.send(f" Added `{bad}` → `{replacement}` to blacklist")
+
+@blacklist.command(name="remove")
+@commands.is_owner()
+async def blacklist_remove(ctx, bad: str):
+    bad = bad.lower()
+    if bad not in replacements:
+        await ctx.send(f" `{bad}` is not in the blacklist")
+    else:
+        removed = replacements.pop(bad)
+        save_blacklist()
+        await ctx.send(f" Removed `{bad}` → `{removed}` from blacklist")
+
+@blacklist.command(name="list")
+@commands.is_owner()
+async def blacklist_list(ctx):
+    if not replacements:
+        await ctx.send("Blacklist is empty")
+    else:
+        items = [f"`{bad}` → `{good}`" for bad, good in sorted(replacements.items())]
+        await ctx.send(" Blacklist:\n" + "\n".join(items))
+
 
 
 # Run the bot
