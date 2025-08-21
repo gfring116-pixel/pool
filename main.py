@@ -1608,7 +1608,7 @@ def normalize(text: str) -> str:
     for k, v in charmap.items():
         t = t.replace(k, v)
     t = re.sub(r'(.)\1+', r'\1', t)
-    t = re.sub(r'[\s-_.]', '', t)
+    t = re.sub(r'[\s._-]', '', t)  # <-- fixed here
     return t
 
 def skeleton(word: str) -> str:
