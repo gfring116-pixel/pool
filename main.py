@@ -13,6 +13,7 @@ from collections import defaultdict
 import os
 from threading import Thread
 from flask import Flask
+import threading, time, requests
 
 # ----------------- Flask for uptime -----------------
 app = Flask("")
@@ -23,6 +24,20 @@ def home():
 
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
+
+def keep_alive():
+    url = "https://pool-cft0.onrender.com"  # your Render URL
+    while True:
+        try:
+            requests.get(url)
+            print("Pinged self to stay awake")
+        except Exception as e:
+            print("Ping failed:", e)
+        time.sleep(300)  # every 5 minutes
+
+# run in background thread
+threading.Thread(target=keep_alive, daemon=True).start()
+
 
 # Run Flask in a separate thread so it won't block the bot
 Thread(target=run_flask).start()
@@ -1497,15 +1512,6 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
-from discord.ext import tasks
-
-CHANNEL_ID = 1391264065170571385
-
-@tasks.loop(minutes=5)  # runs every 5 minutes
-async def send_message_loop():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        await channel.send("I am still online!")
 
 # Run the bot
 if __name__ == "__main__":
