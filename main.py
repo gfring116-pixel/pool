@@ -1522,13 +1522,7 @@ import os
 
 WHITELIST_FILE = "whitelist.json"
 
-# Load whitelist from file or default set
-if os.path.exists(WHITELIST_FILE):
-    with open(WHITELIST_FILE, "r") as f:
-        WHITELIST = set(json.load(f))
-else:
-    WHITELIST = {
-    # everyday "cant/cock/class/pass/mass/tit/cum/woah" safe words
+    WHITELIST = load_list(WHITELIST_FILE, [
     "cant","cannot","canting","recant","recanting","cantina","cantinas",
     "chant","chants","enchant","enchanting","enchantment","enchanted","decant","decanting","scant","scanty",
     "woah","whoa","whoah","wooah",
@@ -1538,7 +1532,7 @@ else:
     "pass","passer","passers","passing","passage","passenger","passengers","compass","surpass","surpassing","trespass","trespassing",
     "mass","masses","massive","amass","massacre","domain","domains","demand","demands",
     "title","titles","titled","titan","titanic","titans","tithes",
-    "cumulative","accumulate","accumulating","accumulation","cucumber", "word"
+    "cumulative","accumulate","accumulating","accumulation","cucumber", "word"])
     }
 
 def save_whitelist():
@@ -1701,33 +1695,59 @@ async def togglefilter(ctx, state: str = None):
     else:
         await ctx.send("⚠️ Use `!togglefilter on` or `!togglefilter off`")
 
+def replace_word(word: str) -> str:
+    nw = normalize(word)
+
+    # ✅ whitelist always wins
+    if word.lower() in WHITELIST or nw in WHITELIST:
+        return word
+
+    # ✅ blacklist exact match
+    if nw in replacements:
+        return replacements[nw]
+
+    # ✅ near-miss short words (like fuc ~ fuck)
+    for bad, clean in replacements.items():
+        if abs(len(nw)-len(bad)) <= 1 and fuzz.ratio(nw,bad) >= 85:
+            return clean
+
+    # ✅ short safe words
+    if len(nw) <= 3:
+        return word
+
+    # ✅ fuzzy matching for longer words
+    for bad, clean in replacements.items():
+        if fuzz.ratio(nw,bad) >= 80 or fuzz.ratio(skeleton(nw),skeleton(bad)) >= 80:
+            return clean
+
+    return word
+
+def clean_text(text: str) -> str:
+    return " ".join(replace_word(w) for w in text.split())
+
 @bot.group(name="whitelist", invoke_without_command=True)
 @commands.is_owner()
 async def whitelist(ctx):
-    """Show whitelist usage if no subcommand used"""
     await ctx.send("Usage: `!whitelist add <word>` | `!whitelist remove <word>` | `!whitelist list`")
 
 @whitelist.command(name="add")
 @commands.is_owner()
 async def whitelist_add(ctx, word: str):
-    word = word.lower()
-    if word in WHITELIST:
-        await ctx.send(f" `{word}` is already whitelisted")
-    else:
-        WHITELIST.add(word)
-        save_whitelist()
-        await ctx.send(f" Added `{word}` to whitelist")
+    WHITELIST.add(word.lower())
+    WHITELIST.add(normalize(word))
+    save_list(WHITELIST_FILE, WHITELIST)
+    await ctx.send(f" `{word}` added to whitelist")
 
 @whitelist.command(name="remove")
 @commands.is_owner()
 async def whitelist_remove(ctx, word: str):
-    word = word.lower()
-    if word not in WHITELIST:
-        await ctx.send(f" `{word}` is not in the whitelist")
-    else:
-        WHITELIST.remove(word)
-        save_whitelist()
-        await ctx.send(f" Removed `{word}` from whitelist")
+    removed = False
+    for form in [word.lower(), normalize(word)]:
+        if form in WHITELIST:
+            WHITELIST.remove(form)
+            removed = True
+    save_list(WHITELIST_FILE, WHITELIST)
+    await ctx.send(f"{' Removed' if removed else ' Not found'} `{word}` from whitelist")
 
 @whitelist.command(name="list")
 @commands.is_owner()
@@ -1736,6 +1756,7 @@ async def whitelist_list(ctx):
         await ctx.send("Whitelist is empty")
     else:
         await ctx.send(" Whitelist:\n" + ", ".join(sorted(WHITELIST)))
+
 
 @bot.group(name="blacklist", invoke_without_command=True)
 @commands.is_owner()
