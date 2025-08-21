@@ -1512,6 +1512,7 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
+import logging
 import re
 import unicodedata
 import discord
@@ -1519,6 +1520,11 @@ from discord.ext import commands
 from fuzzywuzzy import fuzz
 from better_profanity import profanity
 
+# Logging (console)
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("ts-filter")
+
+# Init profanity
 profanity.load_censor_words()
 
 replacements = {
@@ -1590,7 +1596,6 @@ replacements = {
     "cracker": "pal", "crackers": "pals"
 }
 
-# --- Character normalization ---
 charmap = {
     "$": "s", "5": "s", "@": "a", "4": "a", "1": "i", "!": "i",
     "3": "e", "0": "o", "7": "t", "*": "", "-": "", ".": ""
@@ -1602,63 +1607,105 @@ def normalize(text: str) -> str:
     t = ''.join(c for c in t if c.isprintable())
     for k, v in charmap.items():
         t = t.replace(k, v)
-    t = re.sub(r'(.)\1+', r'\1', t)      # collapse repeated letters
-    t = re.sub(r'[\s-_.]', '', t)        # remove spaces/punctuation
+    t = re.sub(r'(.)\1+', r'\1', t)
+    t = re.sub(r'[\s-_.]', '', t)
     return t
 
 def skeleton(word: str) -> str:
     return re.sub(r'[aeiou]', '', word)
 
 def replace_word(word: str) -> str:
-    # 1️⃣ Check profanity first
-    if profanity.contains_profanity(word):
-        return "[friend]"
-
-    # 2️⃣ Check custom replacements
+    # 1) Message-level profanity check is used outside; here we keep per-word fallback
+    # 2) Normalize and use dictionary + fuzzy
     nw = normalize(word)
     if nw in replacements:
         return replacements[nw]
-
-    # 3️⃣ Fuzzy matching
     for bad, clean in replacements.items():
         if fuzz.ratio(nw, bad) >= 80 or fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
             return clean
-
+    # If none matched, leave the original word
     return word
 
 def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
 
-# --- Bot Setup ---
-bot = commands.Bot(command_prefix="!", intents=None)  # put your intents here
+# Debug command to test detection quickly
+@bot.command(name="debugfilter")
+@commands.is_owner()  # optional: restrict to bot owner
+async def debugfilter(ctx, *, text: str):
+    detected = profanity.contains_profanity(text)
+    cleaned = clean_text(text)
+    await ctx.send(f"detected={detected}\ncleaned={cleaned}")
 
 @bot.event
-async def on_message(msg):
-    if msg.author.bot:
+async def on_ready():
+    log.info(f"Bot ready: {bot.user} (id: {bot.user.id})")
+
+@bot.event
+async def on_message(msg: discord.Message):
+    # Safety: ensure it's a guild message we can inspect
+    if msg.author.bot or not msg.guild:
+        await bot.process_commands(msg)
         return
 
-    new_msg = clean_text(msg.content)
-    if new_msg != msg.content:
-        # Try to delete the message, but continue even if forbidden
-        try:
-            await msg.delete()
-        except discord.Forbidden:
-            pass  # admin or permissions prevented deletion
+    # Print debug info for every message (comment out later)
+    log.info(f"MSG from {msg.author} ({msg.author.id}) in {msg.channel} — raw content: {repr(msg.content)}")
 
-        # Always send webhook
+    content = msg.content or ""
+    # 1) Quick message-level profanity detection (catches "fuck" reliably)
+    message_flagged = profanity.contains_profanity(content)
+
+    # 2) If not detected at message-level, do word-level checks (fuzzy + replacements)
+    cleaned_by_words = clean_text(content)
+    words_changed = (cleaned_by_words != content)
+
+    # Decide if we should filter (either message-level flagged OR words changed)
+    if not message_flagged and not words_changed:
+        # nothing to do
+        await bot.process_commands(msg)
+        return
+
+    # Build final cleaned message:
+    # If message flagged by profanity, we replace each profane word with [friend] (simple approach)
+    if message_flagged:
+        # replace each token that profanity flags — simple token-wise approach:
+        tokens = content.split()
+        replaced_tokens = []
+        for t in tokens:
+            if profanity.contains_profanity(t):
+                replaced_tokens.append("[friend]")
+            else:
+                # apply other replacements/fuzzy if necessary
+                replaced_tokens.append(replace_word(t))
+        final = " ".join(replaced_tokens)
+    else:
+        final = cleaned_by_words
+
+    log.info(f"Filtered result for msg id {msg.id}: {repr(final)}")
+
+    # Try to delete original (but continue whether or not deletion succeeds)
+    try:
+        await msg.delete()
+        log.info("Original message deleted.")
+    except discord.Forbidden:
+        log.warning("No permission to delete message; continuing to webhook.")
+    except Exception as e:
+        log.exception("Unexpected error when deleting message (continuing): %s", e)
+
+    # Ensure webhook existence and send cleaned message
+    try:
         hooks = await msg.channel.webhooks()
         hook = discord.utils.get(hooks, name="filter")
         if hook is None:
             hook = await msg.channel.create_webhook(name="filter")
-
-        await hook.send(
-            content=new_msg,
-            username=msg.author.display_name,
-            avatar_url=msg.author.avatar.url if msg.author.avatar else None
-        )
+        await hook.send(content=final,
+                        username=msg.author.display_name,
+                        avatar_url=getattr(msg.author.avatar, "url", None) if msg.author.avatar else None)
+        log.info("Webhook sent cleaned message.")
+    except Exception as e:
+        log.exception("Failed to send webhook: %s", e)
 
     await bot.process_commands(msg)
-
 
 # Run the bot
 if __name__ == "__main__":
