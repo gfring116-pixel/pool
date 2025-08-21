@@ -7,4 +7,4 @@ oauth2client
 flask
 fuzzywuzzy
 python-Levenshtein
-profanity-check
+profanity
