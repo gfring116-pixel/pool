@@ -5,4 +5,6 @@ gspread
 google-auth
 oauth2client
 flask
-
+fuzzywuzzy
+python-Levenshtein
+profanity-check
