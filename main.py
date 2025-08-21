@@ -1647,6 +1647,63 @@ async def debugfilter(ctx, *, text: str):
         f"Filtered: `{cleaned}`"
     )
 
+@bot.listen("on_message")
+async def profanity_filter(msg: discord.Message):
+    # ignore bots + DMs
+    if msg.author.bot or not msg.guild:
+        return
+
+    content = msg.content or ""
+    cleaned = clean_text(content)
+
+    # if nothing changed, do nothing
+    if cleaned == content:
+        return
+
+    # try to delete original
+    try:
+        await msg.delete()
+    except discord.Forbidden:
+        return  # missing permissions
+    except Exception as e:
+        print(f"Delete failed: {e}")
+        return
+
+    # try to resend cleaned message with webhook
+    try:
+        hooks = await msg.channel.webhooks()
+        hook = discord.utils.get(hooks, name="filter")
+        if hook is None:
+            hook = await msg.channel.create_webhook(name="filter")
+        await hook.send(
+            content=cleaned,
+            username=msg.author.display_name,
+            avatar_url=getattr(msg.author.avatar, "url", None) if msg.author.avatar else None
+        )
+    except Exception as e:
+        print(f"Webhook send failed: {e}")
+
+@bot.command(name="togglefilter")
+@commands.is_owner()
+async def togglefilter(ctx, state: str = None):
+    """
+    Toggle the profanity filter on or off.
+    Usage: !togglefilter on / !togglefilter off / !togglefilter
+    """
+    global filter_enabled
+
+    if state is None:
+        await ctx.send(f"Profanity filter is currently **{'ON' if filter_enabled else 'OFF'}**")
+        return
+
+    if state.lower() in ["on", "enable", "enabled", "true", "1"]:
+        filter_enabled = True
+        await ctx.send("✅ Profanity filter is now **ON**")
+    elif state.lower() in ["off", "disable", "disabled", "false", "0"]:
+        filter_enabled = False
+        await ctx.send("❌ Profanity filter is now **OFF**")
+    else:
+        await ctx.send("⚠️ Use `!togglefilter on` or `!togglefilter off`")
 
 
 # Run the bot
