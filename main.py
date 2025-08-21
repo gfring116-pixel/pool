@@ -1592,13 +1592,8 @@ replacements = {
 
 # --- Character normalization ---
 charmap = {
-    "$": "s", "5": "s", "§": "s",
-    "@": "a", "4": "a", "α": "a", "а": "a",
-    "1": "i", "!": "i", "¡": "i", "і": "i",
-    "3": "e", "€": "e", "е": "e",
-    "0": "o", "°": "o", "ο": "o", "о": "o",
-    "7": "t", "+": "t",
-    "*": "", "-": "", ".": ""
+    "$": "s", "5": "s", "@": "a", "4": "a", "1": "i", "!": "i",
+    "3": "e", "0": "o", "7": "t", "*": "", "-": "", ".": ""
 }
 
 def normalize(text: str) -> str:
@@ -1607,27 +1602,26 @@ def normalize(text: str) -> str:
     t = ''.join(c for c in t if c.isprintable())
     for k, v in charmap.items():
         t = t.replace(k, v)
-    t = re.sub(r'(.)\1+', r'\1', t)  # collapse repeated letters
-    t = re.sub(r'[\s-_.]', '', t)    # remove spaces/punctuation
+    t = re.sub(r'(.)\1+', r'\1', t)      # collapse repeated letters
+    t = re.sub(r'[\s-_.]', '', t)        # remove spaces/punctuation
     return t
 
 def skeleton(word: str) -> str:
     return re.sub(r'[aeiou]', '', word)
 
 def replace_word(word: str) -> str:
-    # 1️⃣ Check profanity first on raw word
+    # 1️⃣ Check profanity first
     if profanity.contains_profanity(word):
         return "[friend]"
 
-    # 2️⃣ Normalize for replacements/fuzzy matching
+    # 2️⃣ Check custom replacements
     nw = normalize(word)
     if nw in replacements:
         return replacements[nw]
 
+    # 3️⃣ Fuzzy matching
     for bad, clean in replacements.items():
-        if fuzz.ratio(nw, bad) >= 80:
-            return clean
-        if fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
+        if fuzz.ratio(nw, bad) >= 80 or fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
             return clean
 
     return word
@@ -1645,12 +1639,13 @@ async def on_message(msg):
 
     new_msg = clean_text(msg.content)
     if new_msg != msg.content:
+        # Try to delete the message, but continue even if forbidden
         try:
             await msg.delete()
         except discord.Forbidden:
-            return
+            pass  # admin or permissions prevented deletion
 
-        # Send corrected message via webhook
+        # Always send webhook
         hooks = await msg.channel.webhooks()
         hook = discord.utils.get(hooks, name="filter")
         if hook is None:
