@@ -1517,7 +1517,7 @@ import unicodedata
 import discord
 from discord.ext import commands
 from fuzzywuzzy import fuzz
-import profanity_check as profanity
+import profanity
 
 profanity.load_censor_words()
 
