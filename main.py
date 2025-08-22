@@ -1668,7 +1668,6 @@ def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
 
 # -------------------- Bot Setup --------------------
-bot = commands.Bot(command_prefix="!")
 filter_enabled = True
 
 # -------------------- Commands --------------------
