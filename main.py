@@ -1667,6 +1667,22 @@ def skeleton(word: str) -> str:
     return re.sub(r'[aeiou]', '', word)
 
 # -------------------- Profanity Replacement --------------------
+def match_case(word: str, replacement: str) -> str:
+    """Preserve the original casing style in the replacement."""
+    if word.isupper():
+        return replacement.upper()
+    elif word[0].isupper() and word[1:].islower():
+        return replacement.capitalize()
+    elif any(c.isupper() for c in word[1:]):  
+        # Mixed case → mimic alternating
+        return ''.join(
+            r.upper() if w.isupper() else r.lower()
+            for r, w in zip(replacement, word.ljust(len(replacement)))
+        )
+    else:
+        return replacement.lower()
+
+
 def replace_word(word: str) -> str:
     nw = normalize(word)
 
@@ -1674,27 +1690,29 @@ def replace_word(word: str) -> str:
     if word.lower() in WHITELIST or nw in WHITELIST:
         return word
 
-    # exact blacklist match
+    # exact match
     if nw in replacements:
-        return replacements[nw]
+        return match_case(word, replacements[nw])
 
-    # near-miss short words (like fuc ~ fuck)
+    # substring check (catch "peepfuckpeep"), replace only the bad part
     for bad, clean in replacements.items():
-        if len(nw) <= 4 and abs(len(nw) - len(bad)) <= 1 and fuzz.ratio(nw, bad) >= 90:
-            return clean
+        pattern = re.compile(bad, re.IGNORECASE)
+        if re.search(pattern, nw):
+            return re.sub(
+                pattern,
+                lambda m: match_case(m.group(), clean),
+                word
+            )
 
-    # short words safe unless exact match
+    # short words safe unless exact
     if len(nw) <= 3:
         return word
 
-    # stricter fuzzy matching for longer words
-# stricter fuzzy matching for longer words
+    # fuzzy matches (handles leetspeak like f0ck, fucc, f.ck)
     for bad, clean in replacements.items():
-    # require a very high similarity to catch leetspeak
         if (len(nw) >= 4 and fuzz.ratio(nw, bad) >= 85) or \
            (len(nw) >= 4 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 90):
-            return clean
-
+            return match_case(word, clean)
 
     return word
 
