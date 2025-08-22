@@ -1515,14 +1515,31 @@ async def debug(ctx):
 import re
 import unicodedata
 from fuzzywuzzy import fuzz
-from better_profanity import profanity
 from discord.ext import commands
 import json
 import os
 
+# -------------------- Config --------------------
 WHITELIST_FILE = "whitelist.json"
+BLACKLIST_FILE = "blacklist.json"
 
-    WHITELIST = load_list(WHITELIST_FILE, [
+# -------------------- Helpers --------------------
+def load_list(filename, default=None):
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
+            return set(json.load(f))
+    return set(default or [])
+
+def save_list(filename, data):
+    with open(filename, "w") as f:
+        json.dump(list(data), f, indent=2)
+
+def save_blacklist():
+    with open(BLACKLIST_FILE, "w") as f:
+        json.dump(replacements, f, indent=2)
+
+# -------------------- Whitelist --------------------
+WHITELIST = load_list(WHITELIST_FILE, [
     "cant","cannot","canting","recant","recanting","cantina","cantinas",
     "chant","chants","enchant","enchanting","enchantment","enchanted","decant","decanting","scant","scanty",
     "woah","whoa","whoah","wooah",
@@ -1533,13 +1550,8 @@ WHITELIST_FILE = "whitelist.json"
     "mass","masses","massive","amass","massacre","domain","domains","demand","demands",
     "title","titles","titled","titan","titanic","titans","tithes",
     "cumulative","accumulate","accumulating","accumulation","cucumber", "word"])
-    }
 
-def save_whitelist():
-    with open(WHITELIST_FILE, "w") as f:
-        json.dump(list(WHITELIST), f, indent=2)
-
-# Your replacement dictionary (keep it as-is)
+# -------------------- Replacement Dictionary --------------------
 replacements = {
     "shit": "shoot", "shits": "shoots", "shitty": "messy",
     "fuck": "fudge", "fucks": "fudges", "fucking": "freaking", "fucked": "fudged",
@@ -1564,8 +1576,6 @@ replacements = {
     "bish": "witch",
     "assh": "meanie",
     "dic": "jerk",
-
-    # --- Genital/body insults ---
     "dick": "jerk", "dicks": "jerks",
     "cock": "rooster", "cocks": "roosters",
     "pussy": "cat", "pussies": "cats",
@@ -1576,8 +1586,6 @@ replacements = {
     "boner": "oopsie", "boners": "oopsies",
     "cum": "milk", "cums": "milk", "cumming": "spilling",
     "jizz": "glue", "jizzes": "glue",
-
-    # --- Sexual insults ---
     "slut": "partygoer", "sluts": "partygoers",
     "whore": "worker", "whores": "workers",
     "jerkoff": "daydream", "jerking": "daydreaming",
@@ -1585,16 +1593,12 @@ replacements = {
     "porn": "cartoons", "porno": "cartoon", "pornography": "drawings",
     "stripper": "dancer", "strippers": "dancers",
     "hoe": "gardener", "hoes": "gardeners",
-
-    # --- General insults ---
     "loser": "unlucky one", "losers": "unlucky ones",
     "idiot": "goof", "idiots": "goofs",
     "stupid": "silly", "stupids": "sillies",
     "moron": "dork", "morons": "dorks",
     "douche": "sponge", "douches": "sponges",
     "weirdo": "unique one", "weirdos": "unique ones",
-
-    # --- Slurs ---
     "fag": "friend", "fags": "friends", "faggot": "friend", "faggots": "friends",
     "nigga": "friend", "niggas": "friends",
     "nigger": "friend", "niggers": "friends",
@@ -1613,41 +1617,47 @@ replacements = {
     "cracker": "pal", "crackers": "pals"
 }
 
+# -------------------- Char Normalization --------------------
 charmap = {
     "$": "s", "5": "s", "@": "a", "4": "a", "1": "i", "!": "i",
     "3": "e", "0": "o", "7": "t", "*": "", "-": "", ".": ""
 }
 
-# -------------------- Profanity Helpers --------------------
-
 def normalize(text: str) -> str:
-    """Normalize text for profanity matching: lowercase, strip accents, simplify characters."""
     t = unicodedata.normalize("NFKC", text.lower())
     t = ''.join(c for c in t if not unicodedata.combining(c))
     t = ''.join(c for c in t if c.isprintable())
     for k, v in charmap.items():
         t = t.replace(k, v)
-    t = re.sub(r'(.)\1+', r'\1', t)       # collapse repeated chars
-    t = re.sub(r'[\s._-]', '', t)         # ✅ fixed dash placement
+    t = re.sub(r'(.)\1+', r'\1', t)
+    t = re.sub(r'[\s._-]', '', t)
     return t
 
 def skeleton(word: str) -> str:
-    """Remove vowels for fuzzy skeleton comparison."""
     return re.sub(r'[aeiou]', '', word)
 
+# -------------------- Profanity Replacement --------------------
 def replace_word(word: str) -> str:
-    """Replace a single word if it matches profanity, otherwise return unchanged."""
     nw = normalize(word)
 
-    # ✅ Exact dictionary replacement (handles lowercase, punctuation, etc.)
+    # whitelist always wins
+    if word.lower() in WHITELIST or nw in WHITELIST:
+        return word
+
+    # exact blacklist match
     if nw in replacements:
         return replacements[nw]
 
-    # ✅ Skip fuzzy matching for short words (<=3 chars) unless exact match was found
+    # near-miss short words (like fuc ~ fuck)
+    for bad, clean in replacements.items():
+        if abs(len(nw) - len(bad)) <= 1 and fuzz.ratio(nw, bad) >= 85:
+            return clean
+
+    # short words safe
     if len(nw) <= 3:
         return word
 
-    # ✅ Fuzzy matching for longer words
+    # fuzzy matching for longer words
     for bad, clean in replacements.items():
         if fuzz.ratio(nw, bad) >= 80 or fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
             return clean
@@ -1655,37 +1665,26 @@ def replace_word(word: str) -> str:
     return word
 
 def clean_text(text: str) -> str:
-    """Replace profanity in an entire message."""
     return " ".join(replace_word(w) for w in text.split())
 
-# -------------------- Debug Command --------------------
+# -------------------- Bot Setup --------------------
+bot = commands.Bot(command_prefix="!")
+filter_enabled = True
 
+# -------------------- Commands --------------------
 @bot.command(name="debugfilter")
-@commands.is_owner()  # only bot owner(s) can run this
+@commands.is_owner()
 async def debugfilter(ctx, *, text: str):
-    """
-    Debug command to test profanity replacements.
-    Example: !debugfilter cum
-    """
     cleaned = clean_text(text)
-    await ctx.send(
-        f"Original: `{text}`\n"
-        f"Filtered: `{cleaned}`"
-    )
+    await ctx.send(f"Original: `{text}`\nFiltered: `{cleaned}`")
 
 @bot.command(name="togglefilter")
 @commands.is_owner()
 async def togglefilter(ctx, state: str = None):
-    """
-    Toggle the profanity filter on or off.
-    Usage: !togglefilter on / !togglefilter off / !togglefilter
-    """
     global filter_enabled
-
     if state is None:
         await ctx.send(f"Profanity filter is currently **{'ON' if filter_enabled else 'OFF'}**")
         return
-
     if state.lower() in ["on", "enable", "enabled", "true", "1"]:
         filter_enabled = True
         await ctx.send("✅ Profanity filter is now **ON**")
@@ -1695,36 +1694,7 @@ async def togglefilter(ctx, state: str = None):
     else:
         await ctx.send("⚠️ Use `!togglefilter on` or `!togglefilter off`")
 
-def replace_word(word: str) -> str:
-    nw = normalize(word)
-
-    # ✅ whitelist always wins
-    if word.lower() in WHITELIST or nw in WHITELIST:
-        return word
-
-    # ✅ blacklist exact match
-    if nw in replacements:
-        return replacements[nw]
-
-    # ✅ near-miss short words (like fuc ~ fuck)
-    for bad, clean in replacements.items():
-        if abs(len(nw)-len(bad)) <= 1 and fuzz.ratio(nw,bad) >= 85:
-            return clean
-
-    # ✅ short safe words
-    if len(nw) <= 3:
-        return word
-
-    # ✅ fuzzy matching for longer words
-    for bad, clean in replacements.items():
-        if fuzz.ratio(nw,bad) >= 80 or fuzz.ratio(skeleton(nw),skeleton(bad)) >= 80:
-            return clean
-
-    return word
-
-def clean_text(text: str) -> str:
-    return " ".join(replace_word(w) for w in text.split())
-
+# -------------------- Whitelist Commands --------------------
 @bot.group(name="whitelist", invoke_without_command=True)
 @commands.is_owner()
 async def whitelist(ctx):
@@ -1757,11 +1727,10 @@ async def whitelist_list(ctx):
     else:
         await ctx.send(" Whitelist:\n" + ", ".join(sorted(WHITELIST)))
 
-
+# -------------------- Blacklist Commands --------------------
 @bot.group(name="blacklist", invoke_without_command=True)
 @commands.is_owner()
 async def blacklist(ctx):
-    """Show blacklist usage if no subcommand used"""
     await ctx.send("Usage: `!blacklist add <bad> <replacement>` | `!blacklist remove <bad>` | `!blacklist list`")
 
 @blacklist.command(name="add")
