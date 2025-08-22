@@ -1626,13 +1626,41 @@ charmap = {
 }
 
 def normalize(text: str) -> str:
+    # Unicode normalize + lowercase
     t = unicodedata.normalize("NFKC", text.lower())
     t = ''.join(c for c in t if not unicodedata.combining(c))
     t = ''.join(c for c in t if c.isprintable())
+
+    # Apply custom charmap if you already have one
     for k, v in charmap.items():
         t = t.replace(k, v)
+
+    # Replace common leetspeak / symbols
+    leet_map = {
+        "0": "o",
+        "1": "i",
+        "!": "i",
+        "3": "e",
+        "4": "a",
+        "@": "a",
+        "$": "s",
+        "5": "s",
+        "7": "t",
+        "+": "t",
+        "9": "g",
+    }
+    for k, v in leet_map.items():
+        t = t.replace(k, v)
+
+    # Collapse repeated characters: fuuuuuck -> fuck
     t = re.sub(r'(.)\1+', r'\1', t)
+
+    # Remove spaces, dots, underscores, hyphens: f.o_c-k -> fock
     t = re.sub(r'[\s._-]', '', t)
+
+    # Keep only letters after normalization
+    t = ''.join(ch for ch in t if ch.isalpha())
+
     return t
 
 def skeleton(word: str) -> str:
@@ -1660,11 +1688,13 @@ def replace_word(word: str) -> str:
         return word
 
     # stricter fuzzy matching for longer words
+# stricter fuzzy matching for longer words
     for bad, clean in replacements.items():
-        # require a high similarity
-        if (len(nw) >= 5 and fuzz.ratio(nw, bad) >= 90) or \
-           (len(nw) >= 5 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 95):
+    # require a very high similarity to catch leetspeak
+        if (len(nw) >= 4 and fuzz.ratio(nw, bad) >= 85) or \
+           (len(nw) >= 4 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 90):
             return clean
+
 
     return word
 
