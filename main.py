@@ -1516,6 +1516,7 @@ import re
 import unicodedata
 from fuzzywuzzy import fuzz
 from discord.ext import commands
+import discord
 import json
 import os
 
@@ -1639,36 +1640,40 @@ def skeleton(word: str) -> str:
 # -------------------- Profanity Replacement --------------------
 def replace_word(word: str) -> str:
     nw = normalize(word)
-
-    # whitelist always wins
     if word.lower() in WHITELIST or nw in WHITELIST:
         return word
-
-    # exact blacklist match
     if nw in replacements:
         return replacements[nw]
-
-    # near-miss short words (like fuc ~ fuck)
     for bad, clean in replacements.items():
         if abs(len(nw) - len(bad)) <= 1 and fuzz.ratio(nw, bad) >= 85:
             return clean
-
-    # short words safe
     if len(nw) <= 3:
         return word
-
-    # fuzzy matching for longer words
     for bad, clean in replacements.items():
         if fuzz.ratio(nw, bad) >= 80 or fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
             return clean
-
     return word
 
 def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
 
-# -------------------- Bot Setup --------------------
 filter_enabled = True
+
+# -------------------- Listener --------------------
+@bot.event
+async def on_message(message):
+    if message.author.bot or not filter_enabled:
+        return
+
+    cleaned = clean_text(message.content)
+    if cleaned != message.content:
+        try:
+            await message.delete()
+            await message.channel.send(f"**{message.author.display_name} said:** {cleaned}")
+        except discord.Forbidden:
+            await message.channel.send(f"(Couldn't delete) Cleaned: {cleaned}")
+
+    await bot.process_commands(message)
 
 # -------------------- Commands --------------------
 @bot.command(name="debugfilter")
