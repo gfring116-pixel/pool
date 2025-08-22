@@ -707,6 +707,8 @@ async def cancel_enlistment(ctx):
     else:
         await ctx.send("You don't have any active enlistment session.")
 
+
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -1721,26 +1723,62 @@ def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
 
 # -------------------- Listener --------------------
+ALLOWED_GUILD_ID = 1122152849833459842  # replace with your server ID
+LOG_CHANNEL_ID = 1314931440496017481   # your mod-log channel
+
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot or not filter_enabled:
+    # ignore bots, DMs, or disabled filter
+    if message.author.bot or not filter_enabled or message.guild is None:
+        return
+
+    # only allow in one server
+    if message.guild.id != ALLOWED_GUILD_ID:
         return
 
     cleaned = clean_text(message.content)
+
     if cleaned != message.content:
-        await message.delete()
+        try:
+            await message.delete()
 
-        # reuse or create webhook
-        webhooks = await message.channel.webhooks()
-        webhook = webhooks[0] if webhooks else await message.channel.create_webhook(name="FilterBot")
+            # get or create a webhook
+            webhooks = await message.channel.webhooks()
+            webhook = None
+            for wh in webhooks:
+                if wh.name == "FilterBot":
+                    webhook = wh
+                    break
+            if webhook is None:
+                webhook = await message.channel.create_webhook(name="FilterBot")
 
-        await webhook.send(
-            content=cleaned,
-            username=message.author.display_name,
-            avatar_url=message.author.display_avatar.url
-        )
+            # resend filtered message as the user
+            await webhook.send(
+                content=cleaned,
+                username=message.author.display_name,
+                avatar_url=message.author.display_avatar.url
+            )
+
+            # log the change in mod-log channel
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                embed = discord.Embed(
+                    title="Filtered Message",
+                    color=discord.Color.red(),
+                    timestamp=message.created_at
+                )
+                embed.add_field(name="User", value=f"{message.author} ({message.author.id})", inline=False)
+                embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+                embed.add_field(name="Original", value=message.content[:1000] or "*(empty)*", inline=False)
+                embed.add_field(name="Filtered", value=cleaned[:1000] or "*(empty)*", inline=False)
+
+                await log_channel.send(embed=embed)
+
+        except discord.Forbidden:
+            await message.channel.send(" I don’t have permission to manage messages/webhooks here.")
     else:
-        await bot.process_commands(message)  # still allow commands
+        # still allow commands to work
+        await bot.process_commands(message)
 
 # -------------------- Commands --------------------
 @bot.command(name="debugfilter")
