@@ -55,6 +55,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+filter_enabled = True
 
 # Google Sheets Setup
 credentials_str = os.getenv("GOOGLE_CREDENTIALS")
@@ -1670,9 +1671,6 @@ def replace_word(word: str) -> str:
 
 def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
-
-
-filter_enabled = True
 
 # -------------------- Listener --------------------
 @bot.event
