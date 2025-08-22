@@ -1674,19 +1674,25 @@ filter_enabled = True
 
 # -------------------- Listener --------------------
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     if message.author.bot or not filter_enabled:
         return
 
     cleaned = clean_text(message.content)
     if cleaned != message.content:
-        try:
-            await message.delete()
-            await message.channel.send(f"**{message.author.display_name} said:** {cleaned}")
-        except discord.Forbidden:
-            await message.channel.send(f"(Couldn't delete) Cleaned: {cleaned}")
+        await message.delete()
 
-    await bot.process_commands(message)
+        # reuse or create webhook
+        webhooks = await message.channel.webhooks()
+        webhook = webhooks[0] if webhooks else await message.channel.create_webhook(name="FilterBot")
+
+        await webhook.send(
+            content=cleaned,
+            username=message.author.display_name,
+            avatar_url=message.author.display_avatar.url
+        )
+    else:
+        await bot.process_commands(message)  # still allow commands
 
 # -------------------- Commands --------------------
 @bot.command(name="debugfilter")
