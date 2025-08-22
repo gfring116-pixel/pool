@@ -1661,14 +1661,16 @@ def replace_word(word: str) -> str:
     # stricter fuzzy matching for longer words
     for bad, clean in replacements.items():
         # require a high similarity
-    if (len(nw) >= 5 and fuzz.ratio(nw, bad) >= 90) or \
-       (len(nw) >= 5 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 95):
-        return clean
+        if (len(nw) >= 5 and fuzz.ratio(nw, bad) >= 90) or \
+           (len(nw) >= 5 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 95):
+            return clean
 
     return word
 
+
 def clean_text(text: str) -> str:
     return " ".join(replace_word(w) for w in text.split())
+
 
 filter_enabled = True
 
