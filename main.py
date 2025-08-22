@@ -1640,18 +1640,31 @@ def skeleton(word: str) -> str:
 # -------------------- Profanity Replacement --------------------
 def replace_word(word: str) -> str:
     nw = normalize(word)
+
+    # whitelist always wins
     if word.lower() in WHITELIST or nw in WHITELIST:
         return word
+
+    # exact blacklist match
     if nw in replacements:
         return replacements[nw]
+
+    # near-miss short words (like fuc ~ fuck)
     for bad, clean in replacements.items():
-        if abs(len(nw) - len(bad)) <= 1 and fuzz.ratio(nw, bad) >= 85:
+        if len(nw) <= 4 and abs(len(nw) - len(bad)) <= 1 and fuzz.ratio(nw, bad) >= 90:
             return clean
+
+    # short words safe unless exact match
     if len(nw) <= 3:
         return word
+
+    # stricter fuzzy matching for longer words
     for bad, clean in replacements.items():
-        if fuzz.ratio(nw, bad) >= 80 or fuzz.ratio(skeleton(nw), skeleton(bad)) >= 80:
+        # require a high similarity
+        if (len(nw) >= 5 and fuzz.ratio(nw, bad) >= 90) or \
+           (fuzz.ratio(skeleton(nw), skeleton(bad)) >= 90):
             return clean
+
     return word
 
 def clean_text(text: str) -> str:
