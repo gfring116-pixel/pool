@@ -1688,45 +1688,35 @@ def save_replacements(filename: str, data: Dict[str, str]):
 def normalize(text: str) -> str:
     """
     Aggressive normalization:
-    1) NFKC + lower
-    2) remove zero-width
-    3) apply CHARMAP (homoglyphs/leet) to raw text
-    4) unidecode transliteration
-    5) apply CHARMAP again (catch leftover confusables)
-    6) keep only a-z0-9, collapse repeats
+    - NFKC + lower
+    - remove zero-width chars
+    - apply CHARMAP
+    - unidecode transliteration
+    - apply CHARMAP again
+    - remove spaces & non a-z0-9
+    - collapse repeated letters
     """
     if not text:
         return ""
 
-    # Basic unicode normalisation + lower
-    t = unicodedata.normalize("NFKC", text)
-    t = t.lower()
+    t = unicodedata.normalize("NFKC", text).lower()
 
-    # Remove zero-width/control formatting characters
+    # remove zero-width
     t = re.sub(r'[\u200B-\u200D\u2060-\u206F\uFEFF]', '', t)
 
-    # Apply explicit CHARMAP first (catch direct homoglyphs like Greek 'υ')
-    if CHARMAP:
-        # use list builder for speed
-        out_chars = []
-        for ch in t:
-            out_chars.append(CHARMAP.get(ch, ch))
-        t = ''.join(out_chars)
+    # first CHARMAP pass
+    t = ''.join(CHARMAP.get(ch, ch) for ch in t)
 
-    # Transliterate accents and other scripts -> ascii-like
+    # transliterate
     t = unidecode(t)
 
-    # Apply CHARMAP again in case transliteration left confusable forms
-    if CHARMAP:
-        out_chars = []
-        for ch in t:
-            out_chars.append(CHARMAP.get(ch, ch))
-        t = ''.join(out_chars)
+    # second CHARMAP pass
+    t = ''.join(CHARMAP.get(ch, ch) for ch in t)
 
-    # Strip anything not a-z0-9
+    # ❗ strip spaces and non a-z0-9
     t = re.sub(r'[^a-z0-9]', '', t)
 
-    # Collapse repeated characters (coooool -> col)
+    # collapse repeated letters (niiiiggaaa → niga)
     t = re.sub(r'(.)\1+', r'\1', t)
 
     return t
@@ -1784,13 +1774,14 @@ def replace_token(token: str) -> str:
             return f"{prefix}{rep}{suffix}"
 
     # fuzzy similarity fallback (this catches fyck, fxck, etc.)
-    if len(core_norm) >= 3:  # avoid tiny words
+# fuzzy similarity fallback (catches fyck, fxck, etc.)
+    if len(core_norm) >= 4:  # only run fuzzy on words with 4+ letters
         for bad_norm, good in _norm_replacements.items():
             try:
                 score = fuzz.ratio(core_norm, bad_norm)
             except Exception:
                 score = 0
-            if score >= 85:  # threshold: 85 is usually safe
+            if score >= 88:  # raise threshold to avoid false positives
                 rep = match_case(core, good)
                 return f"{prefix}{rep}{suffix}"
 
