@@ -1749,6 +1749,10 @@ def replace_token(token: str) -> str:
     if not token:
         return token
 
+    # --- allow links (skip filtering if token looks like URL) ---
+    if token.lower().startswith(("http://", "https://", "www.")):
+        return token
+
     # preserve prefix/suffix punctuation
     m = re.match(r'(^[^\w]*)([\w\W]*?)([^\w]*$)', token)
     if m:
