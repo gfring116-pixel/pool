@@ -55,7 +55,10 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-filter_enabled = True
+filter_enabled: bool = True
+WHITELIST: Set[str] = set()
+replacements: Dict[str, str] = dict(REPLACEMENTS)  # runtime copy
+foreign_words: Set[str] = set()
 
 # Google Sheets Setup
 credentials_str = os.getenv("GOOGLE_CREDENTIALS")
@@ -1493,7 +1496,6 @@ async def opromote_error(ctx, error):
     else:
         raise error
 
-
 @officer_demote.error
 async def odemote_error(ctx, error):
     if isinstance(error, CommandOnCooldown):
@@ -1515,49 +1517,41 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
-import re
-import unicodedata
-from fuzzywuzzy import fuzz
-from discord.ext import commands
-from unidecode import unidecode
-import discord
-import json
+from __future__ import annotations
 import os
+import re
+import json
+import unicodedata
+import asyncio
+from typing import Set, Dict
 
-# -------------------- Config --------------------
+import discord
+from discord.ext import commands
+from fuzzywuzzy import fuzz
+from unidecode import unidecode
+
+# -------------------- Configuration --------------------
 WHITELIST_FILE = "whitelist.json"
 BLACKLIST_FILE = "blacklist.json"
+ALLOWED_GUILD_ID = 1122152849833459842  # replace with your server ID
+LOG_CHANNEL_ID = 1314931440496017481   # your mod-log channel
 
-# -------------------- Helpers --------------------
-def load_list(filename, default=None):
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
-            return set(json.load(f))
-    return set(default or [])
-
-def save_list(filename, data):
-    with open(filename, "w") as f:
-        json.dump(list(data), f, indent=2)
-
-def save_blacklist():
-    with open(BLACKLIST_FILE, "w") as f:
-        json.dump(replacements, f, indent=2)
-
-# -------------------- Whitelist --------------------
-WHITELIST = load_list(WHITELIST_FILE, [
+# Default data (you can customize)
+DEFAULT_WHITELIST = [
     "cant","cannot","canting","recant","recanting","cantina","cantinas",
     "chant","chants","enchant","enchanting","enchantment","enchanted","decant","decanting","scant","scanty",
     "woah","whoa","whoah","wooah",
-    "cocktail","cocktails","cockatoo","cockatoos","cockerel","cocker","cockerel","spaniel","peacock","woodcock","hitchcock",
+    "cocktail","cocktails","cockatoo","cockatoos","cockerel","cocker","spaniel","peacock","woodcock","hitchcock",
     "assistant","assistance","assistants",
     "class","classes","classic","classics","classroom","classrooms","classification","classifications","classifier","classifiers",
     "pass","passer","passers","passing","passage","passenger","passengers","compass","surpass","surpassing","trespass","trespassing",
     "mass","masses","massive","amass","massacre","domain","domains","demand","demands",
     "title","titles","titled","titan","titanic","titans","tithes",
-    "cumulative","accumulate","accumulating","accumulation","cucumber", "word"])
+    "cumulative","accumulate","accumulating","accumulation","cucumber", "word"
+]
 
-# -------------------- Replacement Dictionary --------------------
-replacements = {
+# A reasonably large replacement dict - kept as user provided
+REPLACEMENTS: Dict[str, str] = {
     "shit": "shoot", "shits": "shoots", "shitty": "messy",
     "fuck": "fudge", "fucks": "fudges", "fucking": "freaking", "fucked": "fudged",
     "damn": "darn", "damned": "darned", "damnit": "darnit",
@@ -1635,316 +1629,406 @@ CHARMAP = {
     "/": "", "\\": "", "~": "", "^": "", "`": "", ":": "", ";": "", "<": "", ">": ""
 }
 
-def normalize(text: str) -> str:
-    # 1) Unicode normalize + lowercase
-    t = unicodedata.normalize("NFKC", text.lower())
+# -------------------- I/O Helpers --------------------
 
-    # 2) Remove zero-width & formatting chars (ZWJ/ZWNJ/BOM/word-joiners)
+def load_list(filename: str, default=None):
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return set(data)
+        except Exception:
+            # fallback: wipe corrupt file
+            return set(default or [])
+    return set(default or [])
+
+
+def save_list(filename: str, data):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(sorted(list(data)), f, indent=2, ensure_ascii=False)
+
+
+def load_replacements(filename: str, default: Dict[str, str]):
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                return dict(json.load(f))
+        except Exception:
+            return dict(default)
+    return dict(default)
+
+
+def save_replacements(filename: str, data: Dict[str, str]):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+# Load persistent data now
+WHITELIST = load_list(WHITELIST_FILE, DEFAULT_WHITELIST)
+replacements = load_replacements(BLACKLIST_FILE, replacements)
+
+# -------------------- Normalizer & Utilities --------------------
+
+def normalize(text: str) -> str:
+    """Normalizes text for robust matching: lowercase, unicode fold, remove special chars, map leet, collapse repeats."""
+    if not text:
+        return ""
+
+    t = unicodedata.normalize('NFKC', text.lower())
+
+    # remove zero-width and formatting chars
     t = re.sub(r'[\u200B-\u200D\u2060-\u206F\uFEFF]', '', t)
 
-    # 3) Fold accents & homoglyphs to ASCII lookalikes (ü→u, υ→u, ѕ→s, etc.)
+    # fold accents & homoglyphs
     t = unidecode(t)
 
-    # 4) Drop any remaining combining marks & non-printables (safety)
+    # remove combining marks & non-printables
     t = ''.join(c for c in t if c.isprintable() and not unicodedata.combining(c))
 
-    # 5) Map leetspeak/symbol substitutions
+    # map char substitutions
     for k, v in CHARMAP.items():
         t = t.replace(k, v)
 
-    # 6) Collapse repeated chars (fuuuuuck -> fuck)
+    # collapse repeated characters
     t = re.sub(r'(.)\1+', r'\1', t)
 
-    # 7) Strip separators/punct again (belt & braces)
-    t = re.sub(r'[\s.\-_/\\|,;:~^`\'"()\[\]\{\}<>]+', '', t)
+    # strip common separators
+    t = re.sub(r'[\s.\-_/\\|,;:\~\^`\'\"()\[\]\{\}<>]+', '', t)
 
     return t
+
 
 def skeleton(word: str) -> str:
     return re.sub(r'[aeiou]', '', word)
 
-# -------------------- Profanity Replacement --------------------
-def match_case(word: str, replacement: str) -> str:
-    """Preserve the original casing style in the replacement."""
-    if word.isupper():
+
+def match_case(original: str, replacement: str) -> str:
+    """Try to preserve casing pattern of original word in replacement."""
+    if not original:
+        return replacement
+    if original.isupper():
         return replacement.upper()
-    elif word[0].isupper() and word[1:].islower():
+    if original[0].isupper() and original[1:].islower():
         return replacement.capitalize()
-    elif any(c.isupper() for c in word[1:]):  
-        # Mixed case → mimic alternating
-        return ''.join(
-            r.upper() if w.isupper() else r.lower()
-            for r, w in zip(replacement, word.ljust(len(replacement)))
-        )
+    # mixed-case: map each char
+    out = []
+    for i, ch in enumerate(replacement):
+        src_ch = original[i] if i < len(original) else original[-1]
+        out.append(ch.upper() if src_ch.isupper() else ch.lower())
+    return ''.join(out)
+
+# -------------------- Replacement Logic --------------------
+
+def replace_token(token: str) -> str:
+    """Replace offensive content inside a token. Preserves surrounding punctuation.
+    token: a word-like chunk (may include punctuation)."""
+    if not token:
+        return token
+
+    # Split leading/trailing punctuation to preserve it
+    m = re.match(r'(^[^\w]*)([\w\W]*?)([^\w]*$)', token)
+    if m:
+        prefix, core, suffix = m.group(1), m.group(2), m.group(3)
     else:
-        return replacement.lower()
+        prefix, core, suffix = '', token, ''
 
+    core_norm = normalize(core)
 
-def replace_word(word: str) -> str:
-    nw = normalize(word)
+    # whitelist wins (check both raw and normalized)
+    if core.lower() in WHITELIST or core_norm in WHITELIST:
+        return token
 
-    # whitelist always wins
-    if word.lower() in WHITELIST or nw in WHITELIST:
-        return word
+    # direct replacement
+    if core_norm in replacements:
+        replaced = match_case(core, replacements[core_norm])
+        return f"{prefix}{replaced}{suffix}"
 
-    # exact match
-    if nw in replacements:
-        return match_case(word, replacements[nw])
+    # substring replacement on normalized form — attempt to find bad substrings
+    for bad, good in replacements.items():
+        bad_norm = normalize(bad)
+        if not bad_norm:
+            continue
+        if bad_norm in core_norm:
+            # find original substring positions on normalized form and approximate on core
+            # simple approach: replace occurrences using regex on original (case-insensitive)
+            try:
+                pattern = re.compile(re.escape(bad), re.IGNORECASE)
+                new_core = pattern.sub(lambda m: match_case(m.group(), good), core)
+                if new_core != core:
+                    return f"{prefix}{new_core}{suffix}"
+            except re.error:
+                pass
 
-    # substring check (catch "peepfuckpeep"), replace only the bad part
-    for bad, clean in replacements.items():
-        pattern = re.compile(bad, re.IGNORECASE)
-        if re.search(pattern, nw):
-            return re.sub(
-                pattern,
-                lambda m: match_case(m.group(), clean),
-                word
-            )
+    # avoid touching very short words (likely false positives)
+    if len(core_norm) <= 3:
+        return token
 
-    # short words safe unless exact
-    if len(nw) <= 3:
-        return word
+    # fuzzy similarity checks
+    for bad, good in replacements.items():
+        bad_norm = normalize(bad)
+        if len(core_norm) >= 4 and bad_norm:
+            try:
+                score = fuzz.ratio(core_norm, bad_norm)
+            except Exception:
+                score = 0
+            if score >= 85 or (len(core_norm) >= 4 and fuzz.ratio(skeleton(core_norm), skeleton(bad_norm)) >= 90):
+                return f"{prefix}{match_case(core, good)}{suffix}"
 
-    # fuzzy matches (handles leetspeak like f0ck, fucc, f.ck)
-    for bad, clean in replacements.items():
-        if (len(nw) >= 4 and fuzz.ratio(nw, bad) >= 85) or \
-           (len(nw) >= 4 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 90):
-            return match_case(word, clean)
-
-    return word
+    return token
 
 
 def clean_text(text: str) -> str:
-    return " ".join(replace_word(w) for w in text.split())
+    # tokenise on whitespace but keep punctuation attached to tokens
+    tokens = re.split(r'(\s+)', text)
+    out = [replace_token(t) if not t.isspace() else t for t in tokens]
+    return ''.join(out)
 
-# -------------------- Listener --------------------
-ALLOWED_GUILD_ID = 1122152849833459842  # replace with your server ID
-LOG_CHANNEL_ID = 1314931440496017481   # your mod-log channel
+# -------------------- Foreign words loader --------------------
 
-@bot.event
-async def on_message(message: discord.Message):
-    # ignore bots, DMs, or disabled filter
-    if message.author.bot or not filter_enabled or message.guild is None:
-        return
+FOREIGN_WORDLIST_URL_BASE = (
+    "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
+)
+FOREIGN_FILES = ["es", "fr", "de", "it", "pt", "ru", "ar", "hi", "pl", "tr", "nl", "cs"]
 
-    # only allow in one server
-    if message.guild.id != ALLOWED_GUILD_ID:
-        return
-
-    cleaned = clean_text(message.content)
-
-    if cleaned != message.content:
-        try:
-            await message.delete()
-
-            # get or create a webhook
-            webhooks = await message.channel.webhooks()
-            webhook = None
-            for wh in webhooks:
-                if wh.name == "FilterBot":
-                    webhook = wh
-                    break
-            if webhook is None:
-                webhook = await message.channel.create_webhook(name="FilterBot")
-
-            # resend filtered message as the user
-            await webhook.send(
-                content=cleaned,
-                username=message.author.display_name,
-                avatar_url=message.author.display_avatar.url
-            )
-
-            # log the change in mod-log channel
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                embed = discord.Embed(
-                    title="Filtered Message",
-                    color=discord.Color.red(),
-                    timestamp=message.created_at
-                )
-                embed.add_field(name="User", value=f"{message.author} ({message.author.id})", inline=False)
-                embed.add_field(name="Channel", value=message.channel.mention, inline=False)
-                embed.add_field(name="Original", value=message.content[:1000] or "*(empty)*", inline=False)
-                embed.add_field(name="Filtered", value=cleaned[:1000] or "*(empty)*", inline=False)
-
-                await log_channel.send(embed=embed)
-
-        except discord.Forbidden:
-            await message.channel.send(" I don’t have permission to manage messages/webhooks here.")
-
-    # ✅ always allow commands, no matter what
-    await bot.process_commands(message)
-
-# -------------------- Commands --------------------
-@bot.command(name="debugfilter")
-@commands.is_owner()
-async def debugfilter(ctx, *, text: str):
-    cleaned = clean_text(text)
-    await ctx.send(f"Original: `{text}`\nFiltered: `{cleaned}`")
-
-@bot.command(name="togglefilter")
-@commands.is_owner()
-async def togglefilter(ctx, state: str = None):
-    global filter_enabled
-    if state is None:
-        await ctx.send(f"Profanity filter is currently **{'ON' if filter_enabled else 'OFF'}**")
-        return
-    if state.lower() in ["on", "enable", "enabled", "true", "1"]:
-        filter_enabled = True
-        await ctx.send("✅ Profanity filter is now **ON**")
-    elif state.lower() in ["off", "disable", "disabled", "false", "0"]:
-        filter_enabled = False
-        await ctx.send("❌ Profanity filter is now **OFF**")
-    else:
-        await ctx.send("⚠️ Use `!togglefilter on` or `!togglefilter off`")
-
-# -------------------- Whitelist Commands --------------------
-@bot.group(name="whitelist", invoke_without_command=True)
-@commands.is_owner()
-async def whitelist(ctx):
-    await ctx.send("Usage: `!whitelist add <word>` | `!whitelist remove <word>` | `!whitelist list`")
-
-@whitelist.command(name="add")
-@commands.is_owner()
-async def whitelist_add(ctx, word: str):
-    WHITELIST.add(word.lower())
-    WHITELIST.add(normalize(word))
-    save_list(WHITELIST_FILE, WHITELIST)
-    await ctx.send(f" `{word}` added to whitelist")
-
-@whitelist.command(name="remove")
-@commands.is_owner()
-async def whitelist_remove(ctx, word: str):
-    removed = False
-    for form in [word.lower(), normalize(word)]:
-        if form in WHITELIST:
-            WHITELIST.remove(form)
-            removed = True
-    save_list(WHITELIST_FILE, WHITELIST)
-    await ctx.send(f"{' Removed' if removed else ' Not found'} `{word}` from whitelist")
-
-@whitelist.command(name="list")
-@commands.is_owner()
-async def whitelist_list(ctx):
-    if not WHITELIST:
-        await ctx.send("Whitelist is empty")
-    else:
-        await ctx.send(" Whitelist:\n" + ", ".join(sorted(WHITELIST)))
-
-# -------------------- Blacklist Commands --------------------
-@bot.group(name="blacklist", invoke_without_command=True)
-@commands.is_owner()
-async def blacklist(ctx):
-    await ctx.send("Usage: `!blacklist add <bad> <replacement>` | `!blacklist remove <bad>` | `!blacklist list`")
-
-@blacklist.command(name="add")
-@commands.is_owner()
-async def blacklist_add(ctx, bad: str, replacement: str):
-    bad = bad.lower()
-    if bad in replacements:
-        await ctx.send(f" `{bad}` is already blacklisted as → `{replacements[bad]}`")
-    else:
-        replacements[bad] = replacement
-        save_blacklist()
-        await ctx.send(f" Added `{bad}` → `{replacement}` to blacklist")
-
-@blacklist.command(name="remove")
-@commands.is_owner()
-async def blacklist_remove(ctx, bad: str):
-    bad = bad.lower()
-    if bad not in replacements:
-        await ctx.send(f" `{bad}` is not in the blacklist")
-    else:
-        removed = replacements.pop(bad)
-        save_blacklist()
-        await ctx.send(f" Removed `{bad}` → `{removed}` from blacklist")
-
-@blacklist.command(name="list")
-@commands.is_owner()
-async def blacklist_list(ctx):
-    if not replacements:
-        await ctx.send("Blacklist is empty")
-    else:
-        items = [f"`{bad}` → `{good}`" for bad, good in sorted(replacements.items())]
-        await ctx.send(" Blacklist:\n" + "\n".join(items))
-
-# -------------------- Imports --------------------
-import discord
-from fuzzywuzzy import fuzz
-import unicodedata, re, json, urllib.request
-
-LOG_CHANNEL_ID = 1314931440496017481  # replace with your log channel ID
-
-# -------------------- Normalizer --------------------
-charmap = {
-    "0": "o", "1": "i", "3": "e", "4": "a", "@": "a", "5": "s",
-    "$": "s", "7": "t", "+": "t", "8": "b"
-}
-
-def normalize(text: str) -> str:
-    t = unicodedata.normalize("NFKC", text.lower())
-    t = ''.join(c for c in t if not unicodedata.combining(c))
-    t = ''.join(c for c in t if c.isprintable())
-    for k, v in charmap.items():
-        t = t.replace(k, v)
-    t = re.sub(r'(.)\1+', r'\1', t)         # collapse repeats
-    t = re.sub(r'[\s._-]', '', t)           # strip spaces/punctuation
-    return t
-
-def skeleton(text: str) -> str:
-    return re.sub(r'[aeiou]', '', text)
-
-# -------------------- Load Foreign Words --------------------
-# -------------------- Load Foreign Words --------------------
-foreign_words = set()
-
-def load_foreign_wordlists():
+async def load_foreign_wordlists():
+    """Async loader that fetches lists once (best-effort)."""
     global foreign_words
-    base_url = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
-    files = ["es", "fr", "de", "it", "pt", "ru", "ar", "hi", "pl", "tr", "nl", "cs"]
+    # we try using aiohttp if available, otherwise skip external loading
+    try:
+        import aiohttp
+    except Exception:
+        # aiohttp not installed in environment — skip external loads
+        print("aiohttp not installed, skipping foreign wordlist download.")
+        return
 
-    for filename in files:
-        url = base_url + filename
-        try:
-            with urllib.request.urlopen(url) as response:
-                words = response.read().decode("utf-8").splitlines()
-                for w in words:
-                    w = w.strip().lower()
-                    if w:
-                        foreign_words.add(normalize(w))  # normalize on load
-        except Exception as e:
-            print(f"Failed to load {filename}: {e}")
+    async with aiohttp.ClientSession() as session:
+        for fname in FOREIGN_FILES:
+            url = FOREIGN_WORDLIST_URL_BASE + fname
+            try:
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status == 200:
+                        txt = await resp.text()
+                        for w in txt.splitlines():
+                            w = w.strip().lower()
+                            if w:
+                                foreign_words.add(normalize(w))
+            except Exception as exc:
+                print(f"Failed to fetch {url}: {exc}")
 
     print(f"[Filter] Loaded {len(foreign_words)} foreign bad words.")
 
 # -------------------- Delete & Log --------------------
-async def delete_and_log(message, log_channel_id, reason="Foreign word detected"):
-    await message.delete()
-    log_chan = message.guild.get_channel(log_channel_id)
+
+async def delete_and_log(message: discord.Message, reason: str = "Filtered content"):
+    # attempt delete, then send embed to log channel
+    try:
+        await message.delete()
+    except discord.Forbidden:
+        # cannot delete — skip
+        return
+    except Exception:
+        pass
+
+    log_chan = message.guild.get_channel(LOG_CHANNEL_ID) if message.guild else None
     if log_chan:
         embed = discord.Embed(
-            title=" Deleted Message",
+            title="Filtered Message",
             color=discord.Color.red(),
             timestamp=message.created_at
         )
         embed.add_field(name="User", value=f"{message.author} ({message.author.id})", inline=False)
         embed.add_field(name="Channel", value=message.channel.mention, inline=False)
         embed.add_field(name="Reason", value=reason, inline=False)
-        embed.add_field(name="Content", value=message.content[:1000] or "*(empty)*", inline=False)
-        await log_chan.send(embed=embed)
+        embed.add_field(name="Content", value=(message.content[:1000] or "*(empty)*"), inline=False)
+        try:
+            await log_chan.send(embed=embed)
+        except Exception:
+            pass
 
-# -------------------- Handler --------------------
-async def handle_foreign(message, log_channel_id):
-    for word in message.content.split():
-        nw = normalize(word)
-        if nw in foreign_words:
-            await delete_and_log(message, log_channel_id, reason=f"Exact match: {word}")
-            return True
+# -------------------- Message Listener --------------------
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    # start background foreign list download (best-effort)
+    bot.loop.create_task(load_foreign_wordlists())
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    global filter_enabled
+
+    if message.author.bot:
+        return
+
+    # ignore DMs
+    if message.guild is None:
+        await bot.process_commands(message)
+        return
+
+    # check server
+    if message.guild.id != ALLOWED_GUILD_ID:
+        await bot.process_commands(message)
+        return
+
+    # owner/admin toggle bypass — keep commands always allowed
+    if message.content.startswith(bot.command_prefix):
+        await bot.process_commands(message)
+        return
+
+    if not filter_enabled:
+        await bot.process_commands(message)
+        return
+
+    # first pass: check foreign words (exact or fuzzy)
+    # exact matches
+    tokens = [t for t in re.findall(r"\w+", message.content)]
+    for t in tokens:
+        t_norm = normalize(t)
+        if t_norm in foreign_words:
+            await delete_and_log(message, reason=f"Foreign word detected: {t}")
+            return
+        # fuzzy
         for bad in foreign_words:
-            if (len(nw) >= 4 and fuzz.ratio(nw, bad) >= 85) or (len(nw) >= 4 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 90):
-                await delete_and_log(message, log_channel_id, reason=f"Similar to {bad}")
-                return True
-    return False
+            if len(t_norm) >= 4 and fuzz.ratio(t_norm, bad) >= 85:
+                await delete_and_log(message, reason=f"Foreign (similar) to {bad}")
+                return
+
+    # second pass: replace offensive words
+    cleaned = clean_text(message.content)
+
+    if cleaned != message.content:
+        try:
+            # delete original message
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                await message.channel.send("I don't have permission to delete messages here.")
+                return
+
+            # get or create webhook named FilterBot
+            webhooks = await message.channel.webhooks()
+            webhook = next((w for w in webhooks if w.name == "FilterBot"), None)
+            if webhook is None:
+                webhook = await message.channel.create_webhook(name="FilterBot")
+
+            await webhook.send(content=cleaned, username=message.author.display_name, avatar_url=getattr(message.author.display_avatar, 'url', None))
+
+            # log
+            await delete_and_log(message, reason="Profanity filtered")
+        except Exception:
+            # fallback: try sending cleaned message as bot (less ideal)
+            try:
+                await message.channel.send(f"{message.author.display_name}: {cleaned}")
+            except Exception:
+                pass
+
+    # always let commands through
+    await bot.process_commands(message)
+
+# -------------------- Commands --------------------
+
+@bot.command(name="debugfilter")
+@commands.is_owner()
+async def debugfilter(ctx: commands.Context, *, text: str):
+    cleaned = clean_text(text)
+    await ctx.send(f"Original: `{text}`\nFiltered: `{cleaned}`")
+
+
+@bot.command(name="togglefilter")
+@commands.is_owner()
+async def togglefilter(ctx: commands.Context, state: str = None):
+    global filter_enabled
+    if state is None:
+        await ctx.send(f"Profanity filter is currently **{'ON' if filter_enabled else 'OFF'}**")
+        return
+    if state.lower() in ["on", "enable", "enabled", "true", "1"]:
+        filter_enabled = True
+        await ctx.send(" Profanity filter is now **ON**")
+    elif state.lower() in ["off", "disable", "disabled", "false", "0"]:
+        filter_enabled = False
+        await ctx.send(" Profanity filter is now **OFF**")
+    else:
+        await ctx.send(" Use `!togglefilter on` or `!togglefilter off`")
+
+# -------------------- Whitelist Management --------------------
+
+@bot.group(name="whitelist", invoke_without_command=True)
+@commands.is_owner()
+async def whitelist_group(ctx: commands.Context):
+    await ctx.send("Usage: `!whitelist add <word>` | `!whitelist remove <word>` | `!whitelist list`")
+
+
+@whitelist_group.command(name="add")
+@commands.is_owner()
+async def whitelist_add(ctx: commands.Context, word: str):
+    WHITELIST.add(word.lower())
+    WHITELIST.add(normalize(word))
+    save_list(WHITELIST_FILE, WHITELIST)
+    await ctx.send(f"`{word}` added to whitelist")
+
+
+@whitelist_group.command(name="remove")
+@commands.is_owner()
+async def whitelist_remove(ctx: commands.Context, word: str):
+    removed = False
+    for form in [word.lower(), normalize(word)]:
+        if form in WHITELIST:
+            WHITELIST.discard(form)
+            removed = True
+    save_list(WHITELIST_FILE, WHITELIST)
+    await ctx.send((f"Removed `{word}` from whitelist") if removed else (f"`{word}` not found in whitelist"))
+
+
+@whitelist_group.command(name="list")
+@commands.is_owner()
+async def whitelist_list(ctx: commands.Context):
+    if not WHITELIST:
+        await ctx.send("Whitelist is empty")
+    else:
+        await ctx.send("Whitelist:\n" + ", ".join(sorted(WHITELIST)))
+
+# -------------------- Blacklist Management --------------------
+
+@bot.group(name="blacklist", invoke_without_command=True)
+@commands.is_owner()
+async def blacklist_group(ctx: commands.Context):
+    await ctx.send("Usage: `!blacklist add <bad> <replacement>` | `!blacklist remove <bad>` | `!blacklist list`")
+
+
+@blacklist_group.command(name="add")
+@commands.is_owner()
+async def blacklist_add(ctx: commands.Context, bad: str, *, replacement: str):
+    bad = bad.lower()
+    if bad in replacements:
+        await ctx.send(f"`{bad}` is already blacklisted as → `{replacements[bad]}`")
+        return
+    replacements[bad] = replacement
+    save_replacements(BLACKLIST_FILE, replacements)
+    await ctx.send(f"Added `{bad}` → `{replacement}` to blacklist")
+
+
+@blacklist_group.command(name="remove")
+@commands.is_owner()
+async def blacklist_remove(ctx: commands.Context, bad: str):
+    bad = bad.lower()
+    if bad not in replacements:
+        await ctx.send(f"`{bad}` is not in the blacklist")
+        return
+    removed = replacements.pop(bad)
+    save_replacements(BLACKLIST_FILE, replacements)
+    await ctx.send(f"Removed `{bad}` → `{removed}` from blacklist")
+
+
+@blacklist_group.command(name="list")
+@commands.is_owner()
+async def blacklist_list(ctx: commands.Context):
+    if not replacements:
+        await ctx.send("Blacklist is empty")
+    else:
+        items = [f"`{bad}` → `{good}`" for bad, good in sorted(replacements.items())]
+        # split into multiple messages if too long
+        msg = "Blacklist:\n" + "\n".join(items)
+        await ctx.send(msg)
 
 
 # Run the bot
