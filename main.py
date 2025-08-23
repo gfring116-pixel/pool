@@ -1686,35 +1686,46 @@ def save_replacements(filename: str, data: Dict[str, str]):
 # ---------------- Normalizer & utilities ----------------
 def normalize(text: str) -> str:
     """
-    Strong normalization pipeline:
-     - NFKC + lowercase
-     - remove zero-width chars
-     - unidecode (transliterate)
-     - apply CHARMAP (explicit confusables)
-     - remove anything not a-z0-9
-     - collapse repeated chars
+    Aggressive normalization:
+    1) NFKC + lower
+    2) remove zero-width
+    3) apply CHARMAP (homoglyphs/leet) to raw text
+    4) unidecode transliteration
+    5) apply CHARMAP again (catch leftover confusables)
+    6) keep only a-z0-9, collapse repeats
     """
     if not text:
         return ""
 
-    t = unicodedata.normalize('NFKC', text)
+    # Basic unicode normalisation + lower
+    t = unicodedata.normalize("NFKC", text)
     t = t.lower()
 
-    # remove zero-width and formatting
+    # Remove zero-width/control formatting characters
     t = re.sub(r'[\u200B-\u200D\u2060-\u206F\uFEFF]', '', t)
 
-    # transliterate accents/homoglyphs into closest ASCII where possible
+    # Apply explicit CHARMAP first (catch direct homoglyphs like Greek 'υ')
+    if CHARMAP:
+        # use list builder for speed
+        out_chars = []
+        for ch in t:
+            out_chars.append(CHARMAP.get(ch, ch))
+        t = ''.join(out_chars)
+
+    # Transliterate accents and other scripts -> ascii-like
     t = unidecode(t)
 
-    # explicit char map for confusables not handled by unidecode
-    # apply each mapping
-    for k, v in CHARMAP.items():
-        t = t.replace(k, v)
+    # Apply CHARMAP again in case transliteration left confusable forms
+    if CHARMAP:
+        out_chars = []
+        for ch in t:
+            out_chars.append(CHARMAP.get(ch, ch))
+        t = ''.join(out_chars)
 
-    # strip any remaining non-ascii letters/digits
+    # Strip anything not a-z0-9
     t = re.sub(r'[^a-z0-9]', '', t)
 
-    # collapse repeated characters like coooool -> col
+    # Collapse repeated characters (coooool -> col)
     t = re.sub(r'(.)\1+', r'\1', t)
 
     return t
