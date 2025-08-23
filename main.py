@@ -1749,8 +1749,17 @@ def replace_token(token: str) -> str:
     if not token:
         return token
 
-    # --- allow links (skip filtering if token looks like URL) ---
-    if token.lower().startswith(("http://", "https://", "www.")):
+    lower_tok = token.lower()
+
+    # --- allow links, mentions, channels ---
+    if (
+        lower_tok.startswith(("http://", "https://", "www."))
+        or token.startswith("<@")   # user mentions
+        or token.startswith("<#")   # channel mentions
+        or token.startswith("<@&")  # role mentions
+        or token.startswith("@")    # plain @username
+        or token.startswith("#")    # plain #channel
+    ):
         return token
 
     # preserve prefix/suffix punctuation
