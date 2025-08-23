@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import json
 import re
@@ -1517,7 +1518,6 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
-from __future__ import annotations
 import os
 import re
 import json
