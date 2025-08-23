@@ -41,8 +41,9 @@ def keep_alive():
 # run in background thread
 threading.Thread(target=keep_alive, daemon=True).start()
 
-
-# Run Flask in a separate thread so it won't block the bot
+# cooldown tracker {user_id: last_trigger_time}
+last_filter_trigger = {}
+FILTER_COOLDOWN = 5  # seconds
 Thread(target=run_flask).start()
 # Abuse logging config
 LOG_CHANNEL_ID = 1314931440496017481
@@ -1873,12 +1874,6 @@ async def delete_and_log(message: discord.Message, reason: str = "Filtered conte
 
 # ---------------- Events ----------------
 @bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    # start background foreign load if aiohttp available
-    bot.loop.create_task(load_foreign_wordlists())
-
-@bot.event
 async def on_message(message: discord.Message):
     global filter_enabled
 
@@ -1921,62 +1916,59 @@ async def on_message(message: discord.Message):
 
     cleaned = clean_text(message.content)
 
-# cooldown tracker {user_id: last_trigger_time}
-last_filter_trigger = {}
-FILTER_COOLDOWN = 5  # seconds
+    # ---------------- FILTER BLOCK ----------------
+    if cleaned != message.content:
+        now = time.time()
+        last_time = last_filter_trigger.get(message.author.id, 0)
 
+        # if user is still on cooldown → just delete their message, no resend
+        if now - last_time < FILTER_COOLDOWN:
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                return
+            return
 
-if cleaned != message.content:
-    now = time.time()
-    last_time = last_filter_trigger.get(message.author.id, 0)
+        # update cooldown
+        last_filter_trigger[message.author.id] = now
 
-    # if user is still on cooldown → just delete their message, no resend
-    if now - last_time < FILTER_COOLDOWN:
         try:
             await message.delete()
         except discord.Forbidden:
             return
-        return
 
-    # update cooldown
-    last_filter_trigger[message.author.id] = now
+        try:
+            # send censored version via webhook if possible
+            webhooks = await message.channel.webhooks()
+            webhook = next((w for w in webhooks if w.name == "FilterBot"), None)
+            if webhook is None:
+                try:
+                    webhook = await message.channel.create_webhook(name="FilterBot")
+                except Exception:
+                    webhook = None
 
-    try:
-        await message.delete()
-    except discord.Forbidden:
-        return
+            if webhook:
+                await webhook.send(
+                    content=cleaned,
+                    username=message.author.display_name,
+                    avatar_url=getattr(message.author.display_avatar, 'url', None),
+                    wait=True
+                )
+            else:
+                # fallback: send as bot with username prefix
+                await message.channel.send(
+                    f"{message.author.display_name}: {cleaned}",
+                    delete_after=3
+                )
 
-    try:
-        # send censored version via webhook if possible
-        webhooks = await message.channel.webhooks()
-        webhook = next((w for w in webhooks if w.name == "FilterBot"), None)
-        if webhook is None:
-            try:
-                webhook = await message.channel.create_webhook(name="FilterBot")
-            except Exception:
-                webhook = None
+            # log + anti-spam tiny delay
+            await delete_and_log(message, reason="Profanity filtered")
+            await asyncio.sleep(0.5)
 
-        if webhook:
-            await webhook.send(
-                content=cleaned,
-                username=message.author.display_name,
-                avatar_url=getattr(message.author.display_avatar, 'url', None),
-                wait=True
-            )
-        else:
-            # fallback: send as bot with username prefix
-            await message.channel.send(
-                f"{message.author.display_name}: {cleaned}",
-                delete_after=3
-            )
+        except Exception:
+            pass
 
-        # log + anti-spam tiny delay
-        await delete_and_log(message, reason="Profanity filtered")
-        await asyncio.sleep(0.5)
-
-    except Exception:
-        pass
-
+    # make sure commands still work
     await bot.process_commands(message)
 
 # ---------------- Commands ----------------
