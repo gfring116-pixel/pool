@@ -15,6 +15,8 @@ import os
 from threading import Thread
 from flask import Flask
 import threading, time, requests
+import asyncio
+import time
 
 # ----------------- Flask for uptime -----------------
 app = Flask("")
@@ -1918,10 +1920,6 @@ async def on_message(message: discord.Message):
                     pass
 
     cleaned = clean_text(message.content)
-
-
-import asyncio
-import time
 
 # cooldown tracker {user_id: last_trigger_time}
 last_filter_trigger = {}
