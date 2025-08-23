@@ -1895,15 +1895,27 @@ def skeleton(text: str) -> str:
     return re.sub(r'[aeiou]', '', text)
 
 # -------------------- Load Foreign Words --------------------
+# -------------------- Load Foreign Words --------------------
 foreign_words = set()
 
 def load_foreign_wordlists():
+    global foreign_words
     base_url = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
     files = ["es", "fr", "de", "it", "pt", "ru", "ar", "hi", "pl", "tr", "nl", "cs"]
 
     for filename in files:
-        with urllib.request.urlopen(base_url + filename) as response:
-            words = response.read().decode("utf-8").splitlines()
+        url = base_url + filename
+        try:
+            with urllib.request.urlopen(url) as response:
+                words = response.read().decode("utf-8").splitlines()
+                for w in words:
+                    w = w.strip().lower()
+                    if w:
+                        foreign_words.add(normalize(w))  # normalize on load
+        except Exception as e:
+            print(f"Failed to load {filename}: {e}")
+
+    print(f"[Filter] Loaded {len(foreign_words)} foreign bad words.")
 
 # -------------------- Delete & Log --------------------
 async def delete_and_log(message, log_channel_id, reason="Foreign word detected"):
