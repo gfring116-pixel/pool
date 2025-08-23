@@ -1628,40 +1628,38 @@ charmap = {
 }
 
 def normalize(text: str) -> str:
-    # Unicode normalize + lowercase
     t = unicodedata.normalize("NFKC", text.lower())
     t = ''.join(c for c in t if not unicodedata.combining(c))
     t = ''.join(c for c in t if c.isprintable())
 
-    # Apply custom charmap if you already have one
-    for k, v in charmap.items():
-        t = t.replace(k, v)
-
-    # Replace common leetspeak / symbols
-    leet_map = {
+    # leetspeak & bypass chars
+    charmap = {
         "0": "o",
         "1": "i",
-        "!": "i",
         "3": "e",
         "4": "a",
         "@": "a",
         "$": "s",
         "5": "s",
         "7": "t",
-        "+": "t",
-        "9": "g",
+        "!": "i",
+        "*": "",
+        "#": "",
+        "?": "",
+        ".": "",
+        ",": "",
+        "-": "",
+        "_": "",
+        " ": "",   # remove spaces to kill "f u c k"
     }
-    for k, v in leet_map.items():
+    for k, v in charmap.items():
         t = t.replace(k, v)
 
-    # Collapse repeated characters: fuuuuuck -> fuck
+    # collapse repeats (fuuuuck -> fuck)
     t = re.sub(r'(.)\1+', r'\1', t)
 
-    # Remove spaces, dots, underscores, hyphens: f.o_c-k -> fock
-    t = re.sub(r'[\s._-]', '', t)
-
-    # Keep only letters after normalization
-    t = ''.join(ch for ch in t if ch.isalpha())
+    # join split-up letters (f u c k -> fuck)
+    t = re.sub(r'(?:\s|)+', '', t)
 
     return t
 
