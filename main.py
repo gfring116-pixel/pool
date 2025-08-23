@@ -1902,18 +1902,11 @@ foreign_words = set()
 
 def load_foreign_wordlists():
     base_url = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
-    files = ["es.json", "fr.json", "de.json", "it.json", "pt.json",
-             "ru.json", "ar.json", "hi.json", "pl.json", "tr.json",
-             "nl.json", "cs.json"]
+    files = ["es", "fr", "de", "it", "pt", "ru", "ar", "hi", "pl", "tr", "nl", "cs"]
 
     for filename in files:
-        try:
-            with urllib.request.urlopen(base_url + filename) as response:
-                words = json.load(response)
-                for w in words:
-                    foreign_words.add(normalize(w))
-        except Exception as e:
-            print(f" Could not load {filename}: {e}")
+        with urllib.request.urlopen(base_url + filename) as response:
+            words = response.read().decode("utf-8").splitlines()
 
 # -------------------- Delete & Log --------------------
 async def delete_and_log(message, log_channel_id, reason="Foreign word detected"):
