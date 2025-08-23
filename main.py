@@ -1921,41 +1921,63 @@ async def on_message(message: discord.Message):
 
 
 import asyncio
+import time
+
+# cooldown tracker {user_id: last_trigger_time}
+last_filter_trigger = {}
+FILTER_COOLDOWN = 5  # seconds
+
 
 if cleaned != message.content:
+    now = time.time()
+    last_time = last_filter_trigger.get(message.author.id, 0)
+
+    # if user is still on cooldown → just delete their message, no resend
+    if now - last_time < FILTER_COOLDOWN:
+        try:
+            await message.delete()
+        except discord.Forbidden:
+            return
+        return
+
+    # update cooldown
+    last_filter_trigger[message.author.id] = now
+
     try:
         await message.delete()
     except discord.Forbidden:
         return
-    # send censored version, but auto-delete after 10s to avoid clutter
-    await message.channel.send(
-        f"{message.author.display_name}: {cleaned}", 
-        delete_after=3
-        )
-    # tiny delay so multiple spammy users don’t flood Discord
-    await asyncio.sleep(0.5)
 
+    try:
+        # send censored version via webhook if possible
+        webhooks = await message.channel.webhooks()
+        webhook = next((w for w in webhooks if w.name == "FilterBot"), None)
+        if webhook is None:
+            try:
+                webhook = await message.channel.create_webhook(name="FilterBot")
+            except Exception:
+                webhook = None
 
-            # send via webhook to preserve author appearance if possible
-            webhooks = await message.channel.webhooks()
-            webhook = next((w for w in webhooks if w.name == "FilterBot"), None)
-            if webhook is None:
-                try:
-                    webhook = await message.channel.create_webhook(name="FilterBot")
-                except Exception:
-                    webhook = None
+        if webhook:
+            await webhook.send(
+                content=cleaned,
+                username=message.author.display_name,
+                avatar_url=getattr(message.author.display_avatar, 'url', None),
+                wait=True
+            )
+        else:
+            # fallback: send as bot with username prefix
+            await message.channel.send(
+                f"{message.author.display_name}: {cleaned}",
+                delete_after=3
+            )
 
-            if webhook:
-                await webhook.send(content=cleaned, username=message.author.display_name,
-                                   avatar_url=getattr(message.author.display_avatar, 'url', None))
-            else:
-                # fallback: send as bot with username prefix
-                await message.channel.send(f"{message.author.display_name}: {cleaned}")
+        # log + anti-spam tiny delay
+        await delete_and_log(message, reason="Profanity filtered")
+        await asyncio.sleep(0.5)
 
-            await delete_and_log(message, reason="Profanity filtered")
-        except Exception:
-            # final fallback: silently ignore
-            pass
+    except Exception:
+        pass
 
     await bot.process_commands(message)
 
