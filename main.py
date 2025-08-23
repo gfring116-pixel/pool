@@ -1871,6 +1871,78 @@ async def blacklist_list(ctx):
         items = [f"`{bad}` → `{good}`" for bad, good in sorted(replacements.items())]
         await ctx.send(" Blacklist:\n" + "\n".join(items))
 
+# -------------------- Imports --------------------
+import discord
+from fuzzywuzzy import fuzz
+import unicodedata, re, json, urllib.request
+
+LOG_CHANNEL_ID = 1314931440496017481  # replace with your log channel ID
+
+# -------------------- Normalizer --------------------
+charmap = {
+    "0": "o", "1": "i", "3": "e", "4": "a", "@": "a", "5": "s",
+    "$": "s", "7": "t", "+": "t", "8": "b"
+}
+
+def normalize(text: str) -> str:
+    t = unicodedata.normalize("NFKC", text.lower())
+    t = ''.join(c for c in t if not unicodedata.combining(c))
+    t = ''.join(c for c in t if c.isprintable())
+    for k, v in charmap.items():
+        t = t.replace(k, v)
+    t = re.sub(r'(.)\1+', r'\1', t)         # collapse repeats
+    t = re.sub(r'[\s._-]', '', t)           # strip spaces/punctuation
+    return t
+
+def skeleton(text: str) -> str:
+    return re.sub(r'[aeiou]', '', text)
+
+# -------------------- Load Foreign Words --------------------
+foreign_words = set()
+
+def load_foreign_wordlists():
+    base_url = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
+    files = ["es.json", "fr.json", "de.json", "it.json", "pt.json",
+             "ru.json", "ar.json", "hi.json", "pl.json", "tr.json",
+             "nl.json", "cs.json"]
+
+    for filename in files:
+        try:
+            with urllib.request.urlopen(base_url + filename) as response:
+                words = json.load(response)
+                for w in words:
+                    foreign_words.add(normalize(w))
+        except Exception as e:
+            print(f" Could not load {filename}: {e}")
+
+# -------------------- Delete & Log --------------------
+async def delete_and_log(message, log_channel_id, reason="Foreign word detected"):
+    await message.delete()
+    log_chan = message.guild.get_channel(log_channel_id)
+    if log_chan:
+        embed = discord.Embed(
+            title=" Deleted Message",
+            color=discord.Color.red(),
+            timestamp=message.created_at
+        )
+        embed.add_field(name="User", value=f"{message.author} ({message.author.id})", inline=False)
+        embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Content", value=message.content[:1000] or "*(empty)*", inline=False)
+        await log_chan.send(embed=embed)
+
+# -------------------- Handler --------------------
+async def handle_foreign(message, log_channel_id):
+    for word in message.content.split():
+        nw = normalize(word)
+        if nw in foreign_words:
+            await delete_and_log(message, log_channel_id, reason=f"Exact match: {word}")
+            return True
+        for bad in foreign_words:
+            if (len(nw) >= 4 and fuzz.ratio(nw, bad) >= 85) or (len(nw) >= 4 and fuzz.ratio(skeleton(nw), skeleton(bad)) >= 90):
+                await delete_and_log(message, log_channel_id, reason=f"Similar to {bad}")
+                return True
+    return False
 
 
 # Run the bot
