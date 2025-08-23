@@ -1518,6 +1518,19 @@ async def debug(ctx):
         f"Total members: {members}"
     )
 
+# discord_profanity_filter_strict.py
+"""
+Discord profanity filter (strong normalization + normalized blacklist)
+
+- Stronger normalization: NFKC -> unidecode -> explicit homoglyph map -> force-ascii -> collapse repeats.
+- Blacklist keys are normalized at load and on modification for robust lookups.
+- Whitelist entries are normalized.
+- Keeps punctuation/casing when replacing.
+- Minimal external deps: discord.py, unidecode, fuzzywuzzy (optional, for fuzzy matches).
+
+Install dependencies:
+  pip install discord.py unidecode fuzzywuzzy python-Levenshtein
+"""
 import os
 import re
 import json
@@ -1530,11 +1543,11 @@ from discord.ext import commands
 from fuzzywuzzy import fuzz
 from unidecode import unidecode
 
-# -------------------- Configuration --------------------
+# ---------------- Configuration ----------------
 WHITELIST_FILE = "whitelist.json"
 BLACKLIST_FILE = "blacklist.json"
 ALLOWED_GUILD_ID = 1122152849833459842  # replace with your server ID
-LOG_CHANNEL_ID = 1314931440496017481   # your mod-log channel
+LOG_CHANNEL_ID = 1314931440496017481   # replace with your mod-log channel
 
 # Default data (you can customize)
 DEFAULT_WHITELIST = [
@@ -1616,31 +1629,33 @@ REPLACEMENTS: Dict[str, str] = {
     "cracker": "pal", "crackers": "pals"
 }
 
+# Explicit homoglyph / leet map (additional safety)
 CHARMAP = {
-# digits & common leet
-"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t", "8": "b", "9": "g",
-# symbols -> letters
-"@": "a", "$": "s", "+": "t", "€": "e", "£": "l", "¥": "y", "¢": "c", "§": "s",
-"|": "i", "!": "i",
-# brackets & punct (we map '(' to 'c' to catch fu(k)
-"(": "c", ")": "", "{": "", "}": "", "[": "", "]": "",
-# strip these entirely
-"*": "", "#": "", "?": "", ".": "", ",": "", "-": "", "_": "", " ": "",
-"/": "", "\\": "", "~": "", "^": "", "`": "", ":": "", ";": "", "<": "", ">": "",
-# homoglyphs / accented letters (common ones for bypass)
-"ü": "u", "ù": "u", "ú": "u", "û": "u", "ū": "u",
-"í": "i", "ì": "i", "ï": "i", "î": "i", "ī": "i",
-"ó": "o", "ò": "o", "ö": "o", "ô": "o", "õ": "o", "ō": "o",
-"á": "a", "à": "a", "ä": "a", "â": "a", "ã": "a", "å": "a", "ā": "a",
-"é": "e", "è": "e", "ë": "e", "ê": "e", "ē": "e",
-"ç": "c",
-"ñ": "n",
-# Greek homoglyphs
-"υ": "u", "ν": "v", "ρ": "p", "ο": "o", "а": "a", "е": "e", "і": "i", "ѕ": "s" # note: some are Cyrillic
+    # digits & leet
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
+    "@": "a", "$": "s", "+": "t", "|": "i", "!": "i",
+    # punctuation -> remove
+    "*": "", "#": "", "?": "", ".": "", ",": "", "-": "", "_": "", " ": "",
+    "/": "", "\\": "", "~": "", "^": "", "`": "", ":": "", ";": "", "<": "", ">": "",
+    # common accented latin -> base
+    "á": "a", "à": "a", "ä": "a", "â": "a", "ã": "a", "å": "a", "ā": "a",
+    "é": "e", "è": "e", "ê": "e", "ë": "e", "ē": "e",
+    "í": "i", "ì": "i", "ï": "i", "î": "i", "ī": "i",
+    "ó": "o", "ò": "o", "ö": "o", "ô": "o", "õ": "o", "ō": "o",
+    "ú": "u", "ù": "u", "ü": "u", "û": "u", "ū": "u",
+    "ç": "c", "ñ": "n",
+    # Cyrillic -> Latin common confusables
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y",
+    # Greek confusables
+    "υ": "u", "ν": "v", "ο": "o", "ρ": "p", "ι": "i", "σ": "s", "τ": "t",
+    # Fullwidth forms (just in case)
+    "ａ": "a", "ｂ": "b", "ｃ": "c", "ｄ": "d", "ｅ": "e", "ｆ": "f", "ｇ": "g",
+    "ｈ": "h", "ｉ": "i", "ｊ": "j", "ｋ": "k", "ｌ": "l", "ｍ": "m", "ｎ": "n",
+    "ｏ": "o", "ｐ": "p", "ｑ": "q", "ｒ": "r", "ｓ": "s", "ｔ": "t", "ｕ": "u",
+    "ｖ": "v", "ｗ": "w", "ｘ": "x", "ｙ": "y", "ｚ": "z"
 }
 
-# -------------------- I/O Helpers --------------------
-
+# ---------------- I/O helpers ----------------
 def load_list(filename: str, default=None):
     if os.path.exists(filename):
         try:
@@ -1648,15 +1663,12 @@ def load_list(filename: str, default=None):
                 data = json.load(f)
                 return set(data)
         except Exception:
-            # fallback: wipe corrupt file
             return set(default or [])
     return set(default or [])
-
 
 def save_list(filename: str, data):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(sorted(list(data)), f, indent=2, ensure_ascii=False)
-
 
 def load_replacements(filename: str, default: Dict[str, str]):
     if os.path.exists(filename):
@@ -1667,74 +1679,75 @@ def load_replacements(filename: str, default: Dict[str, str]):
             return dict(default)
     return dict(default)
 
-
 def save_replacements(filename: str, data: Dict[str, str]):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-# Load persistent data now
-WHITELIST = load_list(WHITELIST_FILE, DEFAULT_WHITELIST)
-replacements = load_replacements(BLACKLIST_FILE, replacements)
-
-# -------------------- Normalizer & Utilities --------------------
-
+# ---------------- Normalizer & utilities ----------------
 def normalize(text: str) -> str:
-    """Normalizes text for robust matching: lowercase, unicode fold, remove special chars, map leet, collapse repeats."""
+    """
+    Strong normalization pipeline:
+     - NFKC + lowercase
+     - remove zero-width chars
+     - unidecode (transliterate)
+     - apply CHARMAP (explicit confusables)
+     - remove anything not a-z0-9
+     - collapse repeated chars
+    """
     if not text:
         return ""
 
-    t = unicodedata.normalize('NFKC', text.lower())
+    t = unicodedata.normalize('NFKC', text)
+    t = t.lower()
 
-    # remove zero-width and formatting chars
+    # remove zero-width and formatting
     t = re.sub(r'[\u200B-\u200D\u2060-\u206F\uFEFF]', '', t)
 
-    # fold accents & homoglyphs
+    # transliterate accents/homoglyphs into closest ASCII where possible
     t = unidecode(t)
 
-    # remove combining marks & non-printables
-    t = ''.join(c for c in t if c.isprintable() and not unicodedata.combining(c))
-
-    # map char substitutions
+    # explicit char map for confusables not handled by unidecode
+    # apply each mapping
     for k, v in CHARMAP.items():
         t = t.replace(k, v)
 
-    # collapse repeated characters
-    t = re.sub(r'(.)\1+', r'\1', t)
+    # strip any remaining non-ascii letters/digits
+    t = re.sub(r'[^a-z0-9]', '', t)
 
-    # strip common separators
-    t = re.sub(r'[\s.\-_/\\|,;:\~\^`\'\"()\[\]\{\}<>]+', '', t)
+    # collapse repeated characters like coooool -> col
+    t = re.sub(r'(.)\1+', r'\1', t)
 
     return t
 
-
-def skeleton(word: str) -> str:
-    return re.sub(r'[aeiou]', '', word)
-
+def build_normalized_replacements():
+    """Build the _norm_replacements mapping from the human `replacements` dict."""
+    global _norm_replacements
+    _norm_replacements = {}
+    for bad, good in replacements.items():
+        bad_norm = normalize(bad)
+        if bad_norm:
+            _norm_replacements[bad_norm] = good
 
 def match_case(original: str, replacement: str) -> str:
-    """Try to preserve casing pattern of original word in replacement."""
     if not original:
         return replacement
     if original.isupper():
         return replacement.upper()
     if original[0].isupper() and original[1:].islower():
         return replacement.capitalize()
-    # mixed-case: map each char
+    # mixed-case: attempt to map casing per char
     out = []
     for i, ch in enumerate(replacement):
-        src_ch = original[i] if i < len(original) else original[-1]
-        out.append(ch.upper() if src_ch.isupper() else ch.lower())
+        src = original[i] if i < len(original) else original[-1]
+        out.append(ch.upper() if src.isupper() else ch.lower())
     return ''.join(out)
 
-# -------------------- Replacement Logic --------------------
-
+# ---------------- Replacement logic ----------------
 def replace_token(token: str) -> str:
-    """Replace offensive content inside a token. Preserves surrounding punctuation.
-    token: a word-like chunk (may include punctuation)."""
     if not token:
         return token
 
-    # Split leading/trailing punctuation to preserve it
+    # preserve prefix/suffix punctuation
     m = re.match(r'(^[^\w]*)([\w\W]*?)([^\w]*$)', token)
     if m:
         prefix, core, suffix = m.group(1), m.group(2), m.group(3)
@@ -1743,108 +1756,104 @@ def replace_token(token: str) -> str:
 
     core_norm = normalize(core)
 
-    # whitelist wins (check both raw and normalized)
-    if core.lower() in WHITELIST or core_norm in WHITELIST:
+    # whitelist (normalized)
+    if core_norm in WHITELIST:
         return token
 
-    # direct replacement
-    if core_norm in replacements:
-        replaced = match_case(core, replacements[core_norm])
-        return f"{prefix}{replaced}{suffix}"
+    # exact normalized blacklist match
+    if core_norm in _norm_replacements:
+        rep = match_case(core, _norm_replacements[core_norm])
+        return f"{prefix}{rep}{suffix}"
 
-    # substring replacement on normalized form — attempt to find bad substrings
-    for bad, good in replacements.items():
-        bad_norm = normalize(bad)
-        if not bad_norm:
-            continue
-        if bad_norm in core_norm:
-            # find original substring positions on normalized form and approximate on core
-            # simple approach: replace occurrences using regex on original (case-insensitive)
+    # substring match on normalized form
+    for bad_norm, good in _norm_replacements.items():
+        if bad_norm and bad_norm in core_norm:
+            # attempt to replace the offending substring in the original core using case-preserving
             try:
-                pattern = re.compile(re.escape(bad), re.IGNORECASE)
-                new_core = pattern.sub(lambda m: match_case(m.group(), good), core)
-                if new_core != core:
-                    return f"{prefix}{new_core}{suffix}"
-            except re.error:
+                # find approximate slice positions by searching normalized forms
+                # naive: replace using regex on original word for the literal bad (best-effort)
+                pattern = re.compile(re.escape(bad_norm), re.IGNORECASE)
+                # It's better to replace in the normalized string and then reconstruct, but that's complex.
+                # Instead, do fuzzy judgment: if normalized contains the bad_norm, replace entire core.
+                rep = match_case(core, good)
+                return f"{prefix}{rep}{suffix}"
+            except Exception:
                 pass
 
-    # avoid touching very short words (likely false positives)
-    if len(core_norm) <= 3:
-        return token
-
-    # fuzzy similarity checks
-    for bad, good in replacements.items():
-        bad_norm = normalize(bad)
-        if len(core_norm) >= 4 and bad_norm:
+    # fuzzy similarity checks (avoid short words)
+    if len(core_norm) >= 4:
+        for bad_norm, good in _norm_replacements.items():
             try:
                 score = fuzz.ratio(core_norm, bad_norm)
             except Exception:
                 score = 0
-            if score >= 85 or (len(core_norm) >= 4 and fuzz.ratio(skeleton(core_norm), skeleton(bad_norm)) >= 90):
+            if score >= 88:
                 return f"{prefix}{match_case(core, good)}{suffix}"
 
     return token
 
-
 def clean_text(text: str) -> str:
-    # tokenise on whitespace but keep punctuation attached to tokens
-    tokens = re.split(r'(\s+)', text)
-    out = [replace_token(t) if not t.isspace() else t for t in tokens]
+    # split on whitespace but preserve them
+    parts = re.split(r'(\s+)', text)
+    out = []
+    for p in parts:
+        if p.isspace():
+            out.append(p)
+        else:
+            # also split punctuation-adjacent words to preserve punctuation
+            # but replace_token already preserves punctuation, so just call it
+            out.append(replace_token(p))
     return ''.join(out)
 
-# -------------------- Foreign words loader --------------------
+# ---------------- Load persistent data ----------------
+# load & normalize whitelist
+_whitelist_raw = load_list(WHITELIST_FILE, DEFAULT_WHITELIST)
+WHITELIST = set(normalize(x) for x in _whitelist_raw if x)
 
-FOREIGN_WORDLIST_URL_BASE = (
-    "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
-)
-FOREIGN_FILES = ["es", "fr", "de", "it", "pt", "ru", "ar", "hi", "pl", "tr", "nl", "cs"]
+# load replacements & build normalized lookup
+replacements = load_replacements(BLACKLIST_FILE, replacements)
+build_normalized_replacements()
 
+# ---------------- Foreign words loader (optional) ----------------
 async def load_foreign_wordlists():
-    """Async loader that fetches lists once (best-effort)."""
-    global foreign_words
-    # we try using aiohttp if available, otherwise skip external loading
+    # best-effort; requires aiohttp to be installed
     try:
         import aiohttp
     except Exception:
-        # aiohttp not installed in environment — skip external loads
-        print("aiohttp not installed, skipping foreign wordlist download.")
         return
-
+    base = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/"
+    files = ["es", "fr", "de", "it", "pt", "ru", "ar", "hi", "pl", "tr", "nl", "cs"]
     async with aiohttp.ClientSession() as session:
-        for fname in FOREIGN_FILES:
-            url = FOREIGN_WORDLIST_URL_BASE + fname
+        for fname in files:
+            url = base + fname
             try:
                 async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         txt = await resp.text()
                         for w in txt.splitlines():
-                            w = w.strip().lower()
+                            w = w.strip()
                             if w:
                                 foreign_words.add(normalize(w))
-            except Exception as exc:
-                print(f"Failed to fetch {url}: {exc}")
+            except Exception:
+                pass
 
-    print(f"[Filter] Loaded {len(foreign_words)} foreign bad words.")
-
-# -------------------- Delete & Log --------------------
-
+# ---------------- Delete & log ----------------
 async def delete_and_log(message: discord.Message, reason: str = "Filtered content"):
-    # attempt delete, then send embed to log channel
     try:
         await message.delete()
     except discord.Forbidden:
-        # cannot delete — skip
         return
     except Exception:
         pass
 
-    log_chan = message.guild.get_channel(LOG_CHANNEL_ID) if message.guild else None
+    log_chan = None
+    try:
+        log_chan = message.guild.get_channel(LOG_CHANNEL_ID) if message.guild else None
+    except Exception:
+        pass
+
     if log_chan:
-        embed = discord.Embed(
-            title="Filtered Message",
-            color=discord.Color.red(),
-            timestamp=message.created_at
-        )
+        embed = discord.Embed(title="Filtered Message", color=discord.Color.red(), timestamp=message.created_at)
         embed.add_field(name="User", value=f"{message.author} ({message.author.id})", inline=False)
         embed.add_field(name="Channel", value=message.channel.mention, inline=False)
         embed.add_field(name="Reason", value=reason, inline=False)
@@ -1854,14 +1863,12 @@ async def delete_and_log(message: discord.Message, reason: str = "Filtered conte
         except Exception:
             pass
 
-# -------------------- Message Listener --------------------
-
+# ---------------- Events ----------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    # start background foreign list download (best-effort)
+    # start background foreign load if aiohttp available
     bot.loop.create_task(load_foreign_wordlists())
-
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -1870,17 +1877,15 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ignore DMs
     if message.guild is None:
         await bot.process_commands(message)
         return
 
-    # check server
     if message.guild.id != ALLOWED_GUILD_ID:
         await bot.process_commands(message)
         return
 
-    # owner/admin toggle bypass — keep commands always allowed
+    # allow commands to go through
     if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
@@ -1889,60 +1894,61 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return
 
-    # first pass: check foreign words (exact or fuzzy)
-    # exact matches
-    tokens = [t for t in re.findall(r"\w+", message.content)]
+    # quick foreign word check (normalized tokens)
+    tokens = re.findall(r'\w+', message.content)
     for t in tokens:
-        t_norm = normalize(t)
-        if t_norm in foreign_words:
-            await delete_and_log(message, reason=f"Foreign word detected: {t}")
+        tn = normalize(t)
+        if tn in foreign_words:
+            await delete_and_log(message, reason=f"Foreign word: {t}")
             return
-        # fuzzy
-        for bad in foreign_words:
-            if len(t_norm) >= 4 and fuzz.ratio(t_norm, bad) >= 85:
-                await delete_and_log(message, reason=f"Foreign (similar) to {bad}")
-                return
+        # fuzzy check limited to long tokens
+        if len(tn) >= 4:
+            for bad in foreign_words:
+                try:
+                    if fuzz.ratio(tn, bad) >= 88:
+                        await delete_and_log(message, reason=f"Foreign (similar) to {bad}")
+                        return
+                except Exception:
+                    pass
 
-    # second pass: replace offensive words
     cleaned = clean_text(message.content)
-
     if cleaned != message.content:
         try:
-            # delete original message
             try:
                 await message.delete()
             except discord.Forbidden:
                 await message.channel.send("I don't have permission to delete messages here.")
                 return
 
-            # get or create webhook named FilterBot
+            # send via webhook to preserve author appearance if possible
             webhooks = await message.channel.webhooks()
             webhook = next((w for w in webhooks if w.name == "FilterBot"), None)
             if webhook is None:
-                webhook = await message.channel.create_webhook(name="FilterBot")
+                try:
+                    webhook = await message.channel.create_webhook(name="FilterBot")
+                except Exception:
+                    webhook = None
 
-            await webhook.send(content=cleaned, username=message.author.display_name, avatar_url=getattr(message.author.display_avatar, 'url', None))
+            if webhook:
+                await webhook.send(content=cleaned, username=message.author.display_name,
+                                   avatar_url=getattr(message.author.display_avatar, 'url', None))
+            else:
+                # fallback: send as bot with username prefix
+                await message.channel.send(f"{message.author.display_name}: {cleaned}")
 
-            # log
             await delete_and_log(message, reason="Profanity filtered")
         except Exception:
-            # fallback: try sending cleaned message as bot (less ideal)
-            try:
-                await message.channel.send(f"{message.author.display_name}: {cleaned}")
-            except Exception:
-                pass
+            # final fallback: silently ignore
+            pass
 
-    # always let commands through
     await bot.process_commands(message)
 
-# -------------------- Commands --------------------
-
+# ---------------- Commands ----------------
 @bot.command(name="debugfilter")
 @commands.is_owner()
 async def debugfilter(ctx: commands.Context, *, text: str):
     cleaned = clean_text(text)
     await ctx.send(f"Original: `{text}`\nFiltered: `{cleaned}`")
-
 
 @bot.command(name="togglefilter")
 @commands.is_owner()
@@ -1953,41 +1959,36 @@ async def togglefilter(ctx: commands.Context, state: str = None):
         return
     if state.lower() in ["on", "enable", "enabled", "true", "1"]:
         filter_enabled = True
-        await ctx.send(" Profanity filter is now **ON**")
+        await ctx.send("✅ Profanity filter is now **ON**")
     elif state.lower() in ["off", "disable", "disabled", "false", "0"]:
         filter_enabled = False
-        await ctx.send(" Profanity filter is now **OFF**")
+        await ctx.send("❌ Profanity filter is now **OFF**")
     else:
-        await ctx.send(" Use `!togglefilter on` or `!togglefilter off`")
+        await ctx.send("⚠️ Use `!togglefilter on` or `!togglefilter off`")
 
-# -------------------- Whitelist Management --------------------
-
+# whitelist group
 @bot.group(name="whitelist", invoke_without_command=True)
 @commands.is_owner()
 async def whitelist_group(ctx: commands.Context):
     await ctx.send("Usage: `!whitelist add <word>` | `!whitelist remove <word>` | `!whitelist list`")
 
-
 @whitelist_group.command(name="add")
 @commands.is_owner()
 async def whitelist_add(ctx: commands.Context, word: str):
-    WHITELIST.add(word.lower())
     WHITELIST.add(normalize(word))
-    save_list(WHITELIST_FILE, WHITELIST)
-    await ctx.send(f"`{word}` added to whitelist")
-
+    save_list(WHITELIST_FILE, sorted(list(WHITELIST)))
+    await ctx.send(f"`{word}` added to whitelist (normalized)")
 
 @whitelist_group.command(name="remove")
 @commands.is_owner()
 async def whitelist_remove(ctx: commands.Context, word: str):
-    removed = False
-    for form in [word.lower(), normalize(word)]:
-        if form in WHITELIST:
-            WHITELIST.discard(form)
-            removed = True
-    save_list(WHITELIST_FILE, WHITELIST)
-    await ctx.send((f"Removed `{word}` from whitelist") if removed else (f"`{word}` not found in whitelist"))
-
+    form = normalize(word)
+    if form in WHITELIST:
+        WHITELIST.discard(form)
+        save_list(WHITELIST_FILE, sorted(list(WHITELIST)))
+        await ctx.send(f"Removed `{word}` from whitelist")
+    else:
+        await ctx.send(f"`{word}` not found in whitelist")
 
 @whitelist_group.command(name="list")
 @commands.is_owner()
@@ -1995,39 +1996,34 @@ async def whitelist_list(ctx: commands.Context):
     if not WHITELIST:
         await ctx.send("Whitelist is empty")
     else:
-        await ctx.send("Whitelist:\n" + ", ".join(sorted(WHITELIST)))
+        await ctx.send("Whitelist (normalized):\n" + ", ".join(sorted(WHITELIST)))
 
-# -------------------- Blacklist Management --------------------
-
+# blacklist group
 @bot.group(name="blacklist", invoke_without_command=True)
 @commands.is_owner()
 async def blacklist_group(ctx: commands.Context):
     await ctx.send("Usage: `!blacklist add <bad> <replacement>` | `!blacklist remove <bad>` | `!blacklist list`")
 
-
 @blacklist_group.command(name="add")
 @commands.is_owner()
 async def blacklist_add(ctx: commands.Context, bad: str, *, replacement: str):
-    bad = bad.lower()
-    if bad in replacements:
-        await ctx.send(f"`{bad}` is already blacklisted as → `{replacements[bad]}`")
-        return
-    replacements[bad] = replacement
+    bad_raw = bad.lower()
+    replacements[bad_raw] = replacement
     save_replacements(BLACKLIST_FILE, replacements)
-    await ctx.send(f"Added `{bad}` → `{replacement}` to blacklist")
-
+    build_normalized_replacements()
+    await ctx.send(f"Added `{bad}` -> `{replacement}` to blacklist (normalized key: `{normalize(bad)}`)")
 
 @blacklist_group.command(name="remove")
 @commands.is_owner()
 async def blacklist_remove(ctx: commands.Context, bad: str):
-    bad = bad.lower()
-    if bad not in replacements:
-        await ctx.send(f"`{bad}` is not in the blacklist")
-        return
-    removed = replacements.pop(bad)
-    save_replacements(BLACKLIST_FILE, replacements)
-    await ctx.send(f"Removed `{bad}` → `{removed}` from blacklist")
-
+    bad_raw = bad.lower()
+    if bad_raw in replacements:
+        removed = replacements.pop(bad_raw)
+        save_replacements(BLACKLIST_FILE, replacements)
+        build_normalized_replacements()
+        await ctx.send(f"Removed `{bad}` -> `{removed}` from blacklist")
+    else:
+        await ctx.send(f"`{bad}` not found in blacklist")
 
 @blacklist_group.command(name="list")
 @commands.is_owner()
@@ -2035,11 +2031,8 @@ async def blacklist_list(ctx: commands.Context):
     if not replacements:
         await ctx.send("Blacklist is empty")
     else:
-        items = [f"`{bad}` → `{good}`" for bad, good in sorted(replacements.items())]
-        # split into multiple messages if too long
-        msg = "Blacklist:\n" + "\n".join(items)
-        await ctx.send(msg)
-
+        msgs = [f"`{bad}` -> `{rep}` (norm:`{normalize(bad)}`)" for bad, rep in sorted(replacements.items())]
+        await ctx.send("Blacklist:\n" + "\n".join(msgs))
 
 # Run the bot
 if __name__ == "__main__":
