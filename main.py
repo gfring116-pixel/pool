@@ -1774,9 +1774,9 @@ async def on_message(message: discord.Message):
 
         except discord.Forbidden:
             await message.channel.send(" I don’t have permission to manage messages/webhooks here.")
-    else:
-        # still allow commands to work
-        await bot.process_commands(message)
+
+    # ✅ always allow commands, no matter what
+    await bot.process_commands(message)
 
 # -------------------- Commands --------------------
 @bot.command(name="debugfilter")
