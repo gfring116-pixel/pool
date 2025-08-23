@@ -1777,30 +1777,22 @@ def replace_token(token: str) -> str:
         rep = match_case(core, _norm_replacements[core_norm])
         return f"{prefix}{rep}{suffix}"
 
-    # substring match on normalized form
+    # substring match (if a bad word is inside the token)
     for bad_norm, good in _norm_replacements.items():
         if bad_norm and bad_norm in core_norm:
-            # attempt to replace the offending substring in the original core using case-preserving
-            try:
-                # find approximate slice positions by searching normalized forms
-                # naive: replace using regex on original word for the literal bad (best-effort)
-                pattern = re.compile(re.escape(bad_norm), re.IGNORECASE)
-                # It's better to replace in the normalized string and then reconstruct, but that's complex.
-                # Instead, do fuzzy judgment: if normalized contains the bad_norm, replace entire core.
-                rep = match_case(core, good)
-                return f"{prefix}{rep}{suffix}"
-            except Exception:
-                pass
+            rep = match_case(core, good)
+            return f"{prefix}{rep}{suffix}"
 
-    # fuzzy similarity checks (avoid short words)
-    if len(core_norm) >= 4:
+    # fuzzy similarity fallback (this catches fyck, fxck, etc.)
+    if len(core_norm) >= 3:  # avoid tiny words
         for bad_norm, good in _norm_replacements.items():
             try:
                 score = fuzz.ratio(core_norm, bad_norm)
             except Exception:
                 score = 0
-            if score >= 88:
-                return f"{prefix}{match_case(core, good)}{suffix}"
+            if score >= 85:  # threshold: 85 is usually safe
+                rep = match_case(core, good)
+                return f"{prefix}{rep}{suffix}"
 
     return token
 
@@ -1812,8 +1804,6 @@ def clean_text(text: str) -> str:
         if p.isspace():
             out.append(p)
         else:
-            # also split punctuation-adjacent words to preserve punctuation
-            # but replace_token already preserves punctuation, so just call it
             out.append(replace_token(p))
     return ''.join(out)
 
