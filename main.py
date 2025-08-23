@@ -1920,20 +1920,20 @@ async def on_message(message: discord.Message):
     cleaned = clean_text(message.content)
 
 
-    import asyncio
+import asyncio
 
-    if cleaned != message.content:
-        try:
-            await message.delete()
-        except discord.Forbidden:
-            return
+if cleaned != message.content:
+    try:
+        await message.delete()
+    except discord.Forbidden:
+        return
     # send censored version, but auto-delete after 10s to avoid clutter
-        await message.channel.send(
-            f"{message.author.display_name}: {cleaned}", 
-            delete_after=3
+    await message.channel.send(
+        f"{message.author.display_name}: {cleaned}", 
+        delete_after=3
         )
     # tiny delay so multiple spammy users don’t flood Discord
-        await asyncio.sleep(0.5)
+    await asyncio.sleep(0.5)
 
 
             # send via webhook to preserve author appearance if possible
