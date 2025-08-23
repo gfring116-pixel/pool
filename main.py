@@ -1920,7 +1920,7 @@ async def on_message(message: discord.Message):
     cleaned = clean_text(message.content)
 
 
-import asyncio
+    import asyncio
 
     if cleaned != message.content:
         try:
