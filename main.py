@@ -1519,6 +1519,7 @@ import re
 import unicodedata
 from fuzzywuzzy import fuzz
 from discord.ext import commands
+from unidecode import unidecode
 import discord
 import json
 import os
