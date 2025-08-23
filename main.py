@@ -2045,18 +2045,9 @@ async def blacklist_list(ctx: commands.Context):
         msgs = [f"`{bad}` -> `{rep}` (norm:`{normalize(bad)}`)" for bad, rep in sorted(replacements.items())]
         await ctx.send("Blacklist:\n" + "\n".join(msgs))
 
-# Run the bot
 if __name__ == "__main__":
-    TOKEN = os.getenv('DISCORD_TOKEN')
-    
+    TOKEN = os.getenv("DISCORD_TOKEN")
     if not TOKEN:
-        print("BOT_TOKEN not found in environment variables")
-        print("set it like: export BOT_TOKEN=your_token")
-        exit(1)
-    
-    try:
-        bot.run(TOKEN)
-    except discord.LoginFailure:
-        print("invalid bot token")
-    except Exception as e:
-        print(f"error running bot: {e}")
+        raise ValueError("❌ No DISCORD_TOKEN found in environment variables.")
+    bot.run(TOKEN)
+
