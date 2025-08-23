@@ -1621,45 +1621,41 @@ replacements = {
     "cracker": "pal", "crackers": "pals"
 }
 
-# -------------------- Char Normalization --------------------
-charmap = {
-    "$": "s", "5": "s", "@": "a", "4": "a", "1": "i", "!": "i",
-    "3": "e", "0": "o", "7": "t", "*": "", "-": "", ".": ""
+CHARMAP = {
+    # digits & common leet
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t", "8": "b", "9": "g",
+    # symbols -> letters
+    "@": "a", "$": "s", "+": "t", "€": "e", "£": "l", "¥": "y", "¢": "c", "§": "s",
+    "|": "i", "!": "i",
+    # brackets & punct (we map '(' to 'c' to catch fu(k)
+    "(": "c", ")": "", "{": "", "}": "", "[": "", "]": "",
+    # strip these entirely
+    "*": "", "#": "", "?": "", ".": "", ",": "", "-": "", "_": "", " ": "",
+    "/": "", "\\": "", "~": "", "^": "", "`": "", ":": "", ";": "", "<": "", ">": ""
 }
 
 def normalize(text: str) -> str:
+    # 1) Unicode normalize + lowercase
     t = unicodedata.normalize("NFKC", text.lower())
-    t = ''.join(c for c in t if not unicodedata.combining(c))
-    t = ''.join(c for c in t if c.isprintable())
 
-    # leetspeak & bypass chars
-    charmap = {
-        "0": "o",
-        "1": "i",
-        "3": "e",
-        "4": "a",
-        "@": "a",
-        "$": "s",
-        "5": "s",
-        "7": "t",
-        "!": "i",
-        "*": "",
-        "#": "",
-        "?": "",
-        ".": "",
-        ",": "",
-        "-": "",
-        "_": "",
-        " ": "",   # remove spaces to kill "f u c k"
-    }
-    for k, v in charmap.items():
+    # 2) Remove zero-width & formatting chars (ZWJ/ZWNJ/BOM/word-joiners)
+    t = re.sub(r'[\u200B-\u200D\u2060-\u206F\uFEFF]', '', t)
+
+    # 3) Fold accents & homoglyphs to ASCII lookalikes (ü→u, υ→u, ѕ→s, etc.)
+    t = unidecode(t)
+
+    # 4) Drop any remaining combining marks & non-printables (safety)
+    t = ''.join(c for c in t if c.isprintable() and not unicodedata.combining(c))
+
+    # 5) Map leetspeak/symbol substitutions
+    for k, v in CHARMAP.items():
         t = t.replace(k, v)
 
-    # collapse repeats (fuuuuck -> fuck)
+    # 6) Collapse repeated chars (fuuuuuck -> fuck)
     t = re.sub(r'(.)\1+', r'\1', t)
 
-    # join split-up letters (f u c k -> fuck)
-    t = re.sub(r'(?:\s|)+', '', t)
+    # 7) Strip separators/punct again (belt & braces)
+    t = re.sub(r'[\s.\-_/\\|,;:~^`\'"()\[\]\{\}<>]+', '', t)
 
     return t
 
