@@ -8,3 +8,4 @@ flask
 fuzzywuzzy
 python-Levenshtein
 better_profanity
+Unidecode
