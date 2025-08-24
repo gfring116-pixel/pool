@@ -666,7 +666,7 @@ class RegimentView(discord.ui.View):
 
     def make_callback(self, regiment):
         async def callback(interaction):
-            active_sessions[self.author_id] = {
+            active_sessions[self.member.id] = {
                 'step': 'roblox_username',
                 'member': self.member,
                 'regiment': regiment,
@@ -689,15 +689,15 @@ class RegimentView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=None)
 
     async def interaction_check(self, interaction):
-        return interaction.user.id == self.author_id
+        return interaction.user.id == self.target_id
 
 class ConfirmView(discord.ui.View):
     def __init__(self, author_id, member, regiment, roblox_username):
         super().__init__(timeout=300)
-        self.author_id = author_id
         self.member = member
         self.regiment = regiment
         self.roblox_username = roblox_username
+        self.target_id = member.id   # NEW
 
     @discord.ui.button(label="Confirm Enlistment", emoji="✅", style=discord.ButtonStyle.success)
     async def confirm(self, interaction, button):
