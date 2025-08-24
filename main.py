@@ -2173,7 +2173,7 @@ async def blacklist_list(ctx: commands.Context):
         msgs = [f"`{bad}` -> `{rep}` (norm:`{normalize(bad)}`)" for bad, rep in sorted(replacements.items())]
         await ctx.send("Blacklist:\n" + "\n".join(msgs))
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     print("ERROR: TOKEN environment variable not set. Exiting.")
     sys.exit(1)
