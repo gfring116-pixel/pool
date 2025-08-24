@@ -17,6 +17,7 @@ from flask import Flask
 import threading, time, requests
 import asyncio
 import time
+import sys
 
 # ----------------- Flask for uptime -----------------
 app = Flask("")
@@ -2172,9 +2173,35 @@ async def blacklist_list(ctx: commands.Context):
         msgs = [f"`{bad}` -> `{rep}` (norm:`{normalize(bad)}`)" for bad, rep in sorted(replacements.items())]
         await ctx.send("Blacklist:\n" + "\n".join(msgs))
 
+TOKEN = os.getenv("TOKEN")
+if not TOKEN:
+    print("ERROR: TOKEN environment variable not set. Exiting.")
+    sys.exit(1)
+
+async def start_bot():
+    try:
+        print("Attempting to login...")
+        await bot.login(TOKEN)
+        print("Login successful (this line normally won't be reached by itself). Starting bot...")
+        await bot.connect(reconnect=True)
+    except discord.HTTPException as e:
+        # HTTPException wrapping REST problems (429/401/etc)
+        print("Discord HTTPException during login:", repr(e))
+        try:
+            # Try to print response text if available
+            if hasattr(e, 'response') and e.response is not None:
+                print("Response status:", getattr(e.response, 'status', None))
+        except Exception:
+            pass
+        sys.exit(1)
+    except Exception as e:
+        print("Unexpected exception during startup:", type(e), e)
+        sys.exit(1)
+
 if __name__ == "__main__":
-    TOKEN = os.getenv("DISCORD_TOKEN")
-    if not TOKEN:
-        raise ValueError("❌ No DISCORD_TOKEN found in environment variables.")
-    bot.run(TOKEN)
+    try:
+        asyncio.run(start_bot())
+    except KeyboardInterrupt:
+        print("Shutting down.")
+
 
