@@ -624,7 +624,8 @@ async def sync(ctx):
 
 
 
-# ========== BEGIN ENLIST SYSTEM MERGE ==========
+# ========== BEGIN ENLIST SYSTEM MERGE (REPLACED) ==========
+# (Replace the old enlist code with this entire block)
 
 AUTHORIZED_ROLES = {1255061914732597268, 1382604947924979793, 1279450222287655023, 1134711656811855942}
 REGIMENT_ROLES_ENLIST = {
@@ -637,15 +638,27 @@ REGIMENT_ROLES_ENLIST = {
 }
 active_sessions = {}
 
-# ---------------- Enlist debug helper ----------------
+# ---------- Debug helper ----------
 def debug_log(msg: str):
+    # Safe console logging; won't crash the bot if printing fails.
     try:
         print(f"[ENLIST DEBUG] {msg}")
     except Exception:
         pass
 
-# ---------- Updated RegimentView (store session under recruit's id) ----------
+def is_authorized():
+    async def predicate(ctx):
+        has_permission = bool(AUTHORIZED_ROLES.intersection({r.id for r in ctx.author.roles}))
+        if not has_permission:
+            await ctx.send("❌ **Access Denied**: You don't have permission to use this command.")
+        return has_permission
+    return commands.check(predicate)
+
 class RegimentView(discord.ui.View):
+    """
+    Shows regiment buttons. When a regiment is chosen we create a session keyed
+    by the **recruit's** user id (so the recruit's messages will be recognized).
+    """
     def __init__(self, officer_id, member):
         super().__init__(timeout=300)
         self.officer_id = officer_id  # who invoked !enlist (the officer)
@@ -683,12 +696,13 @@ class RegimentView(discord.ui.View):
             )
             embed.add_field(name="📝 Format Example", value=f"`{REGIMENT_ROLES_ENLIST[regiment]['prefix']} (YourUsername)`")
             embed.set_footer(text="Type 'cancel' to cancel this process")
-            # edit the message to remove the regiment buttons (so officer can't re-click)
+
+            # Remove regiment buttons to avoid duplicate session creation
             await interaction.response.edit_message(embed=embed, view=None)
         return callback
 
     async def cancel_callback(self, interaction):
-        # cancel by officer - remove session if present (session keyed by recruit)
+        # officer clicked cancel; remove session keyed by recruit if exists
         if self.member.id in active_sessions:
             del active_sessions[self.member.id]
             debug_log(f"Enlistment session cancelled by officer {interaction.user.id} for recruit {self.member.id}")
@@ -702,8 +716,10 @@ class RegimentView(discord.ui.View):
             await interaction.response.send_message("You can't use this.", ephemeral=True)
         return allowed
 
-# ---------- Updated ConfirmView ----------
 class ConfirmView(discord.ui.View):
+    """
+    Confirm/cancel view shown to the recruit (or officer) after they typed the Roblox username.
+    """
     def __init__(self, officer_id, member, regiment, roblox_username):
         super().__init__(timeout=300)
         self.officer_id = officer_id
@@ -726,11 +742,12 @@ class ConfirmView(discord.ui.View):
             await interaction.response.edit_message(embed=discord.Embed(title="❌ Error", description="Role not found.", color=0xff0000), view=None)
             return
 
-        # Remove other regiment roles
         try:
+            # Remove other regiment roles from the recruit
             for r in list(self.member.roles):
                 if r.id in [info['role_id'] for info in REGIMENT_ROLES_ENLIST.values()]:
                     await self.member.remove_roles(r)
+
             await self.member.add_roles(role)
             nickname = f"{regiment_info['prefix']} {self.roblox_username}"
             if len(nickname) > 32:
@@ -757,7 +774,10 @@ class ConfirmView(discord.ui.View):
 
         except Exception as e:
             debug_log(f"Error during confirm: {e}")
-            await interaction.response.send_message(f"❌ Error during enlist: {e}", ephemeral=True)
+            try:
+                await interaction.response.send_message(f"❌ Error during enlist: {e}", ephemeral=True)
+            except Exception:
+                pass
 
     @discord.ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction, button):
@@ -774,177 +794,15 @@ class ConfirmView(discord.ui.View):
             await interaction.response.send_message("You are not authorized for this action.", ephemeral=True)
         return allowed
 
-# ---------- Updated on_message handler (enlist flow) ----------
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    # If the message author is a recruit with an active session, process it
-    if message.author.id in active_sessions:
-        session = active_sessions[message.author.id]
-        debug_log(f"Got message from active-session user: author={message.author.id} | step={session.get('step')} | content={message.content!r}")
-
-        # ensure they're in the same channel
-        if message.channel.id != session['channel'].id:
-            debug_log("Message ignored: wrong channel")
-            return
-
-        if session.get('step') == 'roblox_username':
-            roblox_username = message.content.strip()
-            debug_log(f"Processing roblox_username='{roblox_username}' for recruit {message.author.id}")
-
-            if roblox_username.lower() == 'cancel':
-                if message.author.id in active_sessions:
-                    del active_sessions[message.author.id]
-                    debug_log(f"Session cancelled by recruit {message.author.id}")
-                await message.channel.send("❌ Enlistment cancelled.")
-                return
-
-            if not (3 <= len(roblox_username) <= 20):
-                debug_log("Invalid roblox username length")
-                return await message.channel.send("❌ Roblox username must be 3–20 characters.")
-
-            # build confirm view that allows recruit or officer to confirm
-            view = ConfirmView(session.get('officer_id'), session['member'], session['regiment'], roblox_username)
-            embed = discord.Embed(
-                title="✅ Confirm Enlistment",
-                description=f"**Member:** {session['member'].mention}\n**Regiment:** {session['regiment'].upper()}\n**Roblox Username:** {roblox_username}",
-                color=0xffff00
-            )
-            await message.channel.send(embed=embed, view=view)
-            debug_log("Sent confirm embed with buttons")
-
-    # allow other commands to be processed as usual
-    await bot.process_commands(message)
-
-# ---------- Debug command to inspect active_sessions ----------
-@bot.command(name='enlistdebug')
-@is_authorized()
-async def enlistdebug(ctx):
-    try:
-        if not active_sessions:
-            return await ctx.send("No active enlistment sessions.")
-        lines = []
-        for recruit_id, s in active_sessions.items():
-            try:
-                recruit = s.get('member')
-                recruit_name = f"{recruit} ({recruit.id})" if recruit else str(recruit_id)
-            except:
-                recruit_name = str(recruit_id)
-            lines.append(f"Recruit: `{recruit_name}` | Step: `{s.get('step')}` | Regiment: `{s.get('regiment')}` | Officer: `{s.get('officer_id')}` | Channel: `{getattr(s.get('channel'), 'id', 'unknown')}`")
-        # avoid spam: use code block
-        await ctx.send("```\n" + "\n".join(lines) + "\n```")
-    except Exception as e:
-        debug_log(f"enlistdebug error: {e}")
-        await ctx.send(f"Error: {e}")
-
-def is_authorized():
-    async def predicate(ctx):
-        has_permission = bool(AUTHORIZED_ROLES.intersection({r.id for r in ctx.author.roles}))
-        if not has_permission:
-            await ctx.send("❌ **Access Denied**: You don't have permission to use this command.")
-        return has_permission
-    return commands.check(predicate)
-
-class RegimentView(discord.ui.View):
-    def __init__(self, author_id, member):
-        super().__init__(timeout=300)
-        self.author_id = author_id
-        self.member = member
-
-        for name, info in REGIMENT_ROLES_ENLIST.items():
-            button = discord.ui.Button(
-                label=f"{name.upper()} {info['prefix']}",
-                emoji=info['emoji'],
-                custom_id=name
-            )
-            button.callback = self.make_callback(name)
-            self.add_item(button)
-
-        cancel_button = discord.ui.Button(label="Cancel", emoji="❌", style=discord.ButtonStyle.danger)
-        cancel_button.callback = self.cancel_callback
-        self.add_item(cancel_button)
-
-    def make_callback(self, regiment):
-        async def callback(interaction):
-            active_sessions[self.member.id] = {
-                'step': 'roblox_username',
-                'member': self.member,
-                'regiment': regiment,
-                'channel': interaction.channel
-            }
-            embed = discord.Embed(
-                title="🎮 **Enter Roblox Username**",
-                description=f"**Member:** {self.member.mention}\n**Regiment:** {regiment.upper()}\n\nPlease **type the Roblox username** in this channel:",
-                color=0xffff00
-            )
-            embed.add_field(name="📝 Format Example", value=f"`{REGIMENT_ROLES_ENLIST[regiment]['prefix']} (YourUsername)`")
-            embed.set_footer(text="Type 'cancel' to cancel this process")
-            await interaction.response.edit_message(embed=embed, view=None)
-        return callback
-
-    async def cancel_callback(self, interaction):
-        if self.author_id in active_sessions:
-            del active_sessions[self.author_id]
-        embed = discord.Embed(title="❌ **Cancelled**", description="Enlistment process cancelled.", color=0xff0000)
-        await interaction.response.edit_message(embed=embed, view=None)
-
-    async def interaction_check(self, interaction):
-        return interaction.user.id == self.target_id
-
-class ConfirmView(discord.ui.View):
-    def __init__(self, author_id, member, regiment, roblox_username):
-        super().__init__(timeout=300)
-        self.member = member
-        self.regiment = regiment
-        self.roblox_username = roblox_username
-        self.target_id = member.id   # NEW
-
-    @discord.ui.button(label="Confirm Enlistment", emoji="✅", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction, button):
-        regiment_info = REGIMENT_ROLES_ENLIST[self.regiment]
-        role = interaction.guild.get_role(regiment_info['role_id'])
-
-        if not role:
-            await interaction.response.edit_message(embed=discord.Embed(title="❌ Error", description="Role not found.", color=0xff0000), view=None)
-            return
-
-        for r in self.member.roles:
-            if r.id in [info['role_id'] for info in REGIMENT_ROLES_ENLIST.values()]:
-                await self.member.remove_roles(r)
-
-        await self.member.add_roles(role)
-        nickname = f"{regiment_info['prefix']} {self.roblox_username}"
-        if len(nickname) > 32:
-            nickname = nickname[:32]
-        try:
-            await self.member.edit(nick=nickname)
-        except discord.Forbidden:
-            await interaction.response.send_message("❌ I don't have permission to change nicknames.", ephemeral=True)
-            return
-
-        embed = discord.Embed(title="🎉 Enlisted Successfully!", color=0x00ff00)
-        embed.add_field(name="👤 Member", value=self.member.mention)
-        embed.add_field(name="🎖️ Regiment", value=self.regiment.upper())
-        embed.add_field(name="🎮 Roblox Username", value=self.roblox_username)
-        embed.add_field(name="🏷️ Nickname", value=nickname)
-        await interaction.response.edit_message(embed=embed, view=None)
-        if self.author_id in active_sessions:
-            del active_sessions[self.author_id]
-
-    @discord.ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction, button):
-        if self.author_id in active_sessions:
-            del active_sessions[self.author_id]
-        await interaction.response.edit_message(embed=discord.Embed(title="❌ Cancelled", color=0xff0000), view=None)
-
-    async def interaction_check(self, interaction):
-        return interaction.user.id == self.author_id
-
 @bot.command(name='enlist')
 @is_authorized()
 async def enlist(ctx, *, member_input=None):
+    """
+    Officer starts enlist flow:
+      !enlist @user
+    The recruit (target user) must click a regiment button and then type
+    their Roblox username in the same channel to continue.
+    """
     if ctx.author.id in active_sessions:
         return await ctx.send("❌ You already have an active enlistment session.")
 
@@ -956,9 +814,13 @@ async def enlist(ctx, *, member_input=None):
 
     guild = ctx.guild
     member = None
+    # accept mention, id, name, or display_name
     if member_input.startswith('<@') and member_input.endswith('>'):
         member_id = member_input[2:-1].lstrip('!')
-        member = guild.get_member(int(member_id))
+        try:
+            member = guild.get_member(int(member_id))
+        except Exception:
+            member = None
     elif member_input.isdigit():
         member = guild.get_member(int(member_input))
     else:
@@ -976,41 +838,87 @@ async def enlist(ctx, *, member_input=None):
 @bot.command(name='cancel')
 @is_authorized()
 async def cancel_enlistment(ctx):
-    if ctx.author.id in active_sessions:
-        del active_sessions[ctx.author.id]
-        await ctx.send("❌ Your enlistment session has been cancelled.")
+    # officer cancels any active session for the recruit they targeted earlier (if known)
+    # allow officer to cancel any session they created by scanning active_sessions
+    removed = []
+    for rid, sess in list(active_sessions.items()):
+        if sess.get('officer_id') == ctx.author.id:
+            del active_sessions[rid]
+            removed.append(rid)
+            debug_log(f"Officer {ctx.author.id} cancelled session for recruit {rid}")
+    if removed:
+        await ctx.send(f"Cancelled enlistment session(s) for: {', '.join(str(x) for x in removed)}")
     else:
         await ctx.send("You don't have any active enlistment session.")
 
-
-
+# Handle recruit free-text input (Roblox username)
 @bot.event
 async def on_message(message):
+    # Early pass-through for non-enlist logic: preserve any other on_message handlers in file
     if message.author.bot:
         return
 
+    # If the message author is a recruit with an active enlist session, process it
     if message.author.id in active_sessions:
         session = active_sessions[message.author.id]
+        debug_log(f"Got message from active-session user: author={message.author.id} | step={session.get('step')} | content={message.content!r}")
+
+        # ensure they're in the same channel the session expects
         if message.channel.id != session['channel'].id:
+            debug_log(f"Message ignored: wrong channel (got {message.channel.id} expected {session['channel'].id})")
+            # don't process commands if this was intended for enlist; return early
             return
-        if session['step'] == 'roblox_username':
+
+        if session.get('step') == 'roblox_username':
             roblox_username = message.content.strip()
+            debug_log(f"Processing roblox_username='{roblox_username}' for recruit {message.author.id}")
+
             if roblox_username.lower() == 'cancel':
-                del active_sessions[message.author.id]
+                if message.author.id in active_sessions:
+                    del active_sessions[message.author.id]
+                    debug_log(f"Session cancelled by recruit {message.author.id}")
                 await message.channel.send("❌ Enlistment cancelled.")
                 return
+
             if not (3 <= len(roblox_username) <= 20):
+                debug_log("Invalid roblox username length")
                 return await message.channel.send("❌ Roblox username must be 3–20 characters.")
-            view = ConfirmView(message.author.id, session['member'], session['regiment'], roblox_username)
+
+            # Construct the confirm view and show it in the channel
+            view = ConfirmView(session.get('officer_id'), session['member'], session['regiment'], roblox_username)
             embed = discord.Embed(
                 title="✅ Confirm Enlistment",
                 description=f"**Member:** {session['member'].mention}\n**Regiment:** {session['regiment'].upper()}\n**Roblox Username:** {roblox_username}",
                 color=0xffff00
             )
             await message.channel.send(embed=embed, view=view)
+            debug_log("Sent confirm embed with buttons")
+            return  # important: avoid falling through to bot.process_commands for this message
+
+    # Let other commands and logic continue
     await bot.process_commands(message)
 
-# ========== END ENLIST SYSTEM MERGE ==========
+# Debug command to inspect active_sessions
+@bot.command(name='enlistdebug')
+@is_authorized()
+async def enlistdebug(ctx):
+    try:
+        if not active_sessions:
+            return await ctx.send("No active enlistment sessions.")
+        lines = []
+        for recruit_id, s in active_sessions.items():
+            try:
+                recruit = s.get('member')
+                recruit_name = f"{recruit} ({recruit.id})" if recruit else str(recruit_id)
+            except:
+                recruit_name = str(recruit_id)
+            lines.append(f"Recruit: `{recruit_name}` | Step: `{s.get('step')}` | Regiment: `{s.get('regiment')}` | Officer: `{s.get('officer_id')}` | Channel: `{getattr(s.get('channel'), 'id', 'unknown')}`")
+        await ctx.send("```\n" + "\n".join(lines) + "\n```")
+    except Exception as e:
+        debug_log(f"enlistdebug error: {e}")
+        await ctx.send(f"Error: {e}")
+
+# ========== END ENLIST SYSTEM MERGE (REPLACED) ==========
 ON_DUTY_CHANNEL_NAME = "on-duty"  # Must match exactly (case-insensitive ok)
 CHEESECAKE_USER_ID = 728201873366056992, 940752980989341756  # Replace with your actual ID
 managed_roles = {}
