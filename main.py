@@ -1720,6 +1720,17 @@ async def on_member_join(member):
                 await user_in_b.add_roles(role)
                 print(f"Gave {user_in_b} the Recruit role in Server B")
 
+@bot.command()
+async def delmsg(ctx, *ids: int):
+    """Delete one or more messages by their IDs"""
+    for msg_id in ids:
+        try:
+            msg = await ctx.channel.fetch_message(msg_id)
+            await msg.delete()
+            await ctx.send(f"✅ Deleted message `{msg_id}`", delete_after=3)
+        except:
+            await ctx.send(f"⚠️ Could not delete `{msg_id}`", delete_after=3)
+
 # Run bot
                                         
 TOKEN = os.getenv("DISCORD_TOKEN")
