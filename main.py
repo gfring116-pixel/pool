@@ -18,6 +18,11 @@ import threading, time, requests
 import asyncio
 import time
 import sys
+import io
+import textwrap
+import traceback
+import contextlib
+
 
 # ----------------- Flask for uptime -----------------
 app = Flask("")
@@ -1727,9 +1732,48 @@ async def delmsg(ctx, *ids: int):
         try:
             msg = await ctx.channel.fetch_message(msg_id)
             await msg.delete()
-            await ctx.send(f"✅ Deleted message `{msg_id}`", delete_after=3)
+            await ctx.send(f" Deleted message `{msg_id}`", delete_after=3)
         except:
-            await ctx.send(f"⚠️ Could not delete `{msg_id}`", delete_after=3)
+            await ctx.send(f" Could not delete `{msg_id}`", delete_after=3)
+
+OWNER_ID = 728201873366056992  # replace with your Discord user ID
+
+@bot.command(name="eval")
+async def _eval(ctx, *, code: str):
+    # Restrict to owner only
+    if ctx.author.id != OWNER_ID:
+        return await ctx.send(" You can’t use this.")
+
+    # Strip ```python ... ``` code blocks
+    if code.startswith("```") and code.endswith("```"):
+        code = "\n".join(code.split("\n")[1:-1])
+
+    # Variables available inside eval
+    env = {
+        "bot": bot,
+        "discord": discord,
+        "ctx": ctx,
+        "message": ctx.message,
+        "author": ctx.author,
+        "guild": ctx.guild,
+        "channel": ctx.channel,
+    }
+
+    stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout):
+            exec(
+                f"async def func():\n{textwrap.indent(code, '    ')}",
+                env,
+            )
+            result = await env["func"]()
+    except Exception:
+        value = stdout.getvalue()
+        error = traceback.format_exc()
+        return await ctx.send(f" Error:\n```py\n{value}{error}\n```")
+
+    value = stdout.getvalue()
+    await ctx.send(f" Output:\n```py\n{value}{result}\n```")
 
 # Run bot
                                         
