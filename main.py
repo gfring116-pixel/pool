@@ -1775,6 +1775,80 @@ async def _eval(ctx, *, code: str):
     value = stdout.getvalue()
     await ctx.send(f" Output:\n```py\n{value}{result}\n```")
 
+    # track warnings and suspensions
+user_warnings = {}
+user_offenses = {}
+MAX_WARNINGS = 3           # warnings before suspension
+BASE_SUSPEND_TIME = 60     # first suspension length in seconds
+MEDIA_CHANNEL_ID = 1314629507746893906
+OFF_DUTY_CHANNEL_NAME = "off-duty"  # change if your chat channel has a different name
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+
+    # allow only admins (with administrator perm) to talk freely
+    if message.author.guild_permissions.administrator:
+        return
+
+    # only check messages in the media channel
+    if message.channel.id == MEDIA_CHANNEL_ID:
+        # if the message has no attachments (image/video/file), treat as text
+        if len(message.attachments) == 0:
+            await message.delete()
+
+            user_id = message.author.id
+            user_warnings[user_id] = user_warnings.get(user_id, 0) + 1
+            warnings = user_warnings[user_id]
+
+            # send warning with reminder (deleted after 30s)
+            await message.channel.send(
+                f"{message.author.mention}, media channel is for images and videos only. "
+                f"warning {warnings}/{MAX_WARNINGS}. "
+                f"if you want to talk about an image or video, please do it in the {OFF_DUTY_CHANNEL_NAME} channel or make a thread.",
+                delete_after=30
+            )
+
+            # suspension if warnings exceeded
+            if warnings >= MAX_WARNINGS:
+                await suspend_from_channel(message.author, message.channel)
+
+    await bot.process_commands(message)
+
+
+async def suspend_from_channel(member: discord.Member, channel: discord.TextChannel):
+    user_id = member.id
+
+    # track how many times this user has been suspended
+    user_offenses[user_id] = user_offenses.get(user_id, 0) + 1
+    offense_count = user_offenses[user_id]
+
+    # suspension time grows each offense (1st = 60s, 2nd = 120s, etc.)
+    suspend_time = BASE_SUSPEND_TIME * offense_count
+
+    # deny the user send messages permission temporarily
+    overwrite = channel.overwrites_for(member)
+    overwrite.send_messages = False
+    await channel.set_permissions(member, overwrite=overwrite)
+
+    await channel.send(
+        f"{member.mention} has been suspended from posting in this channel for {suspend_time} seconds.",
+        delete_after=30
+    )
+
+    # wait, then restore permissions
+    await asyncio.sleep(suspend_time)
+    await channel.set_permissions(member, overwrite=None)
+
+    # reset warnings after suspension
+    user_warnings[user_id] = 0
+    await channel.send(
+        f"{member.mention} can now post again in this channel.",
+        delete_after=30
+)
+
 # Run bot
                                         
 TOKEN = os.getenv("DISCORD_TOKEN")
