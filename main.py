@@ -1775,89 +1775,6 @@ async def _eval(ctx, *, code: str):
     value = stdout.getvalue()
     await ctx.send(f" Output:\n```py\n{value}{result}\n```")
 
-# track warnings and suspensions
-user_warnings = {}
-user_offenses = {}
-MAX_WARNINGS = 3           # warnings before suspension
-BASE_SUSPEND_TIME = 60     # first suspension length in seconds
-MEDIA_CHANNEL_ID = 1314629507746893906
-LOG_CHANNEL_ID = 1314931440496017481
-OFF_DUTY_CHANNEL_NAME = "off-duty"  # change if needed
-
-
-# whitelist of media sources
-WHITELISTED_SOURCES = [
-    "youtube.com", "youtu.be",
-    "tiktok.com",
-    "instagram.com", "instagr.am", "fb.watch", "facebook.com/reel", "facebook.com/watch",
-    "twitter.com", "x.com",
-    "reddit.com", "v.redd.it",
-    "tenor.com", "giphy.com", "imgur.com", "gyazo.com", "streamable.com",
-    "twitch.tv", "kick.com", "medal.tv",
-    "spotify.com", "soundcloud.com", "bandcamp.com",
-    "vimeo.com", "dailymotion.com"
-]
-
-
-def is_media_message(message: discord.Message) -> bool:
-    """check if the message counts as media (allowed)"""
-    # block discord invites always
-    if "discord.gg" in message.content.lower():
-        return False
-
-    # allow if attachments exist
-    if len(message.attachments) > 0:
-        return True
-
-    # allow embeds if the link is from a whitelisted source
-    if len(message.embeds) > 0:
-        content = message.content.lower()
-        if any(source in content for source in WHITELISTED_SOURCES):
-            return True
-        return False
-
-    # plain text = not media
-    return False
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-
-    # allow admins to bypass
-    if message.author.guild_permissions.administrator:
-        return
-
-    if message.channel.id == MEDIA_CHANNEL_ID:
-        if not is_media_message(message):
-            await message.delete()
-
-            user_id = message.author.id
-            user_warnings[user_id] = user_warnings.get(user_id, 0) + 1
-            warnings = user_warnings[user_id]
-
-            # public warning (auto delete after 30s)
-            await message.channel.send(
-                f"{message.author.mention}, media channel is for images and videos only. "
-                f"warning {warnings}/{MAX_WARNINGS}. "
-                f"if you want to talk about an image or video, please do it in the {OFF_DUTY_CHANNEL_NAME} channel or make a thread.",
-                delete_after=30
-            )
-
-            # log warning (keep permanent)
-            log_channel = message.guild.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                await log_channel.send(
-                    f"Warning issued to {message.author} ({message.author.id}) "
-                    f"in {message.channel.mention}. Count: {warnings}/{MAX_WARNINGS}\n"
-                    f"Deleted message content: {message.content}"
-                )
-
-            # suspend if too many warnings
-            if warnings >= MAX_WARNINGS:
-                await suspend_from_channel(message.author, message.channel)
-
     await bot.process_commands(message)
 
 
@@ -1929,13 +1846,6 @@ async def removewhitelist(ctx, domain: str):
         await ctx.send(f"Removed {domain} from whitelist.")
     else:
         await ctx.send(f"{domain} is not in the whitelist.")
-
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def listwhitelist(ctx):
-    whitelist_str = ", ".join(WHITELISTED_SOURCES)
-    await ctx.send(f"Current whitelist: {whitelist_str}")
 
 # Run bot
                                         
