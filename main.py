@@ -153,44 +153,44 @@ main_sheet = client.open("__1ST VANGUARD DIVISION MERIT DATA__").sheet1
 _HEADER_CACHE = {}
 
 def _locate_headers(force=False):
-    \"\"\"Locate Name / Merits / Rank headers on the sheet and cache their cols/row.
+    """Locate Name / Merits / Rank headers on the sheet and cache their cols/row.
     Returns (name_col, merit_col, rank_col, data_start_row)
-    \"\"\"
+    """
     if _HEADER_CACHE and not force:
         return _HEADER_CACHE['name_col'], _HEADER_CACHE['merit_col'], _HEADER_CACHE['rank_col'], _HEADER_CACHE['data_start_row']
     try:
-        name_cell = main_sheet.find(\"Name\")
-        merit_cell = main_sheet.find(\"Merits\")
-        rank_cell = main_sheet.find(\"Rank\")
+        name_cell = main_sheet.find("Name")
+        merit_cell = main_sheet.find("Merits")
+        rank_cell = main_sheet.find("Rank")
     except Exception:
-        raise RuntimeError(\"Sheet headers 'Name','Merits','Rank' not found\")
+        raise RuntimeError("Sheet headers 'Name','Merits','Rank' not found")
     name_col, merit_col, rank_col = name_cell.col, merit_cell.col, rank_cell.col
     data_start_row = name_cell.row + 1
     _HEADER_CACHE.update({'name_col':name_col,'merit_col':merit_col,'rank_col':rank_col,'data_start_row':data_start_row})
     return name_col, merit_col, rank_col, data_start_row
 
 def _get_all_records():
-    \"\"\"Return list of dicts: {'name':str,'merits':int,'row':int}
-    Iterates rows after the header row; ignores empty name rows.\"\"\"
+    """Return list of dicts: {'name':str,'merits':int,'row':int}
+    Iterates rows after the header row; ignores empty name rows."""
     name_col, merit_col, rank_col, data_start = _locate_headers()
     rows = main_sheet.get_all_values()
     records = []
     for idx, r in enumerate(rows[data_start-1:], start=data_start):
         if not r or len(r) < 1:
             continue
-        name = (r[name_col-1] if len(r) >= name_col else \"\").strip()
+        name = (r[name_col-1] if len(r) >= name_col else "").strip()
         if not name:
             continue
         # parse merits safely
         try:
-            merits = int((r[merit_col-1] if len(r) >= merit_col else \"0\") or 0)
+            merits = int((r[merit_col-1] if len(r) >= merit_col else "0") or 0)
         except Exception:
             merits = 0
         records.append({'name': name, 'merits': merits, 'row': idx})
     return records
 
 def _find_record(name):
-    \"\"\"Case-insensitive find. Returns record dict or None.\"\"\"
+    """Case-insensitive find. Returns record dict or None."""
     for rec in _get_all_records():
         if rec['name'].lower() == name.lower():
             return rec
@@ -206,12 +206,12 @@ def _append_user(name, points, rank_name=None):
     rows = main_sheet.get_all_values()
     # find empty row slot under name_col
     for i, r in enumerate(rows[data_start-1:], start=data_start):
-        existing = (r[name_col-1] if len(r) >= name_col else \"\").strip()
+        existing = (r[name_col-1] if len(r) >= name_col else "").strip()
         if not existing:
-            main_sheet.insert_row([name, points, rank_name or \"\"], index=i)
+            main_sheet.insert_row([name, points, rank_name or ""], index=i)
             return i
     # otherwise append at end
-    main_sheet.append_row([name, points, rank_name or \"\"])
+    main_sheet.append_row([name, points, rank_name or ""])
     return len(rows) + 1
 
 def _get_rank_for_points(points):
