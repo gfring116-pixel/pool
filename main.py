@@ -605,7 +605,7 @@ async def selfpromote(ctx):
     )
     await ctx.send(embed=embed)
 
-@bot.command()@bot.command()
+@bot.command()
 @commands.has_any_role(*HOST_ROLES)
 async def sync(ctx):
     """Sync sheet merits with Discord roles; update 'Rank' column accordingly."""
@@ -775,53 +775,146 @@ def extract_number(value):
     match = re.search(r'\d+', str(value))
     return int(match.group()) if match else 0
 
-@bot.command()@bot.command()
+@bot.command()
+@bot.command()
 @commands.is_owner()
-async def forceadd(ctx, roblox_name: str, points: int):
-    """Add points or create user in main_sheet (short and reliable)."""
+async def forceadd(ctx, *args):
+    """Add points to one or more users. Usage flexible:
+    - `!forceadd 10 target1 target2 @user 123456` (points first)
+    - `!forceadd target1 target2 10` (points last)
+    Targets may be Roblox usernames, Discord mentions, or numeric Discord IDs.
+    """
+    if not args:
+        return await ctx.send("Usage: provide points and at least one target.")
+    # determine points position: prefer first if int, otherwise last
     try:
-        rec = _find_record(roblox_name)
-        if rec:
-            total = rec['merits'] + points
-            _set_merits_by_row(rec['row'], total)
-            return await ctx.send(f"{roblox_name} now has {total} merit points.")
+        if len(args) >= 2 and str(args[0]).lstrip('-').isdigit():
+            points = int(args[0])
+            targets = args[1:]
+        elif str(args[-1]).lstrip('-').isdigit():
+            points = int(args[-1])
+            targets = args[:-1]
         else:
-            _append_user(roblox_name, points)
-            return await ctx.send(f"{roblox_name} added with {points} points.")
+            return await ctx.send("❌ Could not find points (must be an integer). Use `!forceadd 10 target1` or `!forceadd target1 10`.")
     except Exception as e:
-        return await ctx.send(f"Error: {e}")
-@bot.command()@bot.command()
+        return await ctx.send(f"Error parsing points: {e}")
+
+    if points <= 0:
+        return await ctx.send("Points must be a positive integer.")
+
+    results = []
+    for t in targets:
+        t = str(t).strip()
+        member = None
+        # mention form or id
+        if t.startswith('<@') and t.endswith('>'):
+            try:
+                member_id = int(t.strip('<@!>'))
+                member = ctx.guild.get_member(member_id)
+            except:
+                member = None
+        elif t.isdigit():
+            member = ctx.guild.get_member(int(t))
+        else:
+            # try find by exact name/display
+            member = discord.utils.get(ctx.guild.members, name=t) or discord.utils.get(ctx.guild.members, display_name=t)
+
+        if member:
+            roblox_name = extract_roblox_name(member.display_name)
+        else:
+            roblox_name = t  # treat as raw roblox username
+
+        try:
+            rec = _find_record(roblox_name)
+            if rec:
+                total = rec['merits'] + points
+                _set_merits_by_row(rec['row'], total)
+                results.append(f"✅ {roblox_name}: now {total}")
+            else:
+                _append_user(roblox_name, points)
+                results.append(f"➕ {roblox_name}: added with {points}")
+        except Exception as e:
+            results.append(f"❌ {roblox_name}: error {e}")
+
+    await ctx.send("\\n".join(results))
+
+@bot.command()
+@bot.command()
 @commands.is_owner()
-async def resetmerit(ctx, roblox_name: str):
-    """Reset a user's merits to 0."""
-    try:
-        rec = _find_record(roblox_name)
-        if not rec:
-            return await ctx.send(f"{roblox_name} not found in the sheet.")
-        _set_merits_by_row(rec['row'], 0)
-        return await ctx.send(f"{roblox_name}'s merits have been reset to 0.")
-    except Exception as e:
-        return await ctx.send(f"Error: {e}")
-@bot.command()@bot.command()
+async def resetmerit(ctx, *targets):
+    """Reset one or more users' merits to 0.
+    Usage: `!resetmerit user1 @user 123456`"""
+    if not targets:
+        return await ctx.send("Provide at least one username, mention, or ID.")
+    results = []
+    for t in targets:
+        t = str(t).strip()
+        member = None
+        if t.startswith('<@') and t.endswith('>'):
+            try:
+                member_id = int(t.strip('<@!>'))
+                member = ctx.guild.get_member(member_id)
+            except:
+                member = None
+        elif t.isdigit():
+            member = ctx.guild.get_member(int(t))
+        else:
+            member = discord.utils.get(ctx.guild.members, name=t) or discord.utils.get(ctx.guild.members, display_name=t)
+
+        if member:
+            roblox_name = extract_roblox_name(member.display_name)
+        else:
+            roblox_name = t
+
+        try:
+            rec = _find_record(roblox_name)
+            if not rec:
+                results.append(f"❌ {roblox_name}: not found")
+            else:
+                _set_merits_by_row(rec['row'], 0)
+                results.append(f"✅ {roblox_name}: reset to 0")
+        except Exception as e:
+            results.append(f"❌ {roblox_name}: error {e}")
+    await ctx.send("\\n".join(results))
+
+@bot.command()
+@bot.command()
 @commands.is_owner()
-async def purgeuser(ctx, roblox_name: str):
-    """Remove a user entirely from the sheet."""
-    try:
-        rec = _find_record(roblox_name)
-        if not rec:
-            return await ctx.send(f"{roblox_name} not found in the sheet.")
-        main_sheet.delete_rows(rec['row'])
-        return await ctx.send(f"{roblox_name} has been removed from the sheet.")
-    except Exception as e:
-        return await ctx.send(f"Error: {e}")
-async def on_ready():
-    print(f'{bot.user} is online!')
-    # Sync slash commands
-    try:
-        synced = await bot.tree.sync()
-        print(f'synced {len(synced)} commands')
-    except Exception as e:
-        print(f'failed to sync commands: {e}')
+async def purgeuser(ctx, *targets):
+    """Remove one or more users from the sheet.
+    Usage: `!purgeuser user1 @user 123456`"""
+    if not targets:
+        return await ctx.send("Provide at least one username, mention, or ID.")
+    results = []
+    for t in targets:
+        t = str(t).strip()
+        member = None
+        if t.startswith('<@') and t.endswith('>'):
+            try:
+                member_id = int(t.strip('<@!>'))
+                member = ctx.guild.get_member(member_id)
+            except:
+                member = None
+        elif t.isdigit():
+            member = ctx.guild.get_member(int(t))
+        else:
+            member = discord.utils.get(ctx.guild.members, name=t) or discord.utils.get(ctx.guild.members, display_name=t)
+
+        if member:
+            roblox_name = extract_roblox_name(member.display_name)
+        else:
+            roblox_name = t
+
+        try:
+            rec = _find_record(roblox_name)
+            if not rec:
+                results.append(f"❌ {roblox_name}: not found")
+            else:
+                main_sheet.delete_rows(rec['row'])
+                results.append(f"🗑️ {roblox_name}: removed")
+        except Exception as e:
+            results.append(f"❌ {roblox_name}: error {e}")
+    await ctx.send("\\n".join(results))
 
 @bot.command(name='cheesecake')
 async def cheesecake_command(ctx):
