@@ -634,47 +634,6 @@ async def sync(ctx):
         await ctx.send("sync complete")
     except Exception as e:
         await ctx.send(f"Sync failed: {e}")
-@bot.command(name='enlist')
-@is_authorized()
-async def enlist(ctx, *, member_input=None):
-    """
-    Officer starts enlist flow:
-      !enlist @user
-    The recruit (target user) must click a regiment button and then type
-    their Roblox username in the same channel to continue.
-    """
-    if ctx.author.id in active_sessions:
-        return await ctx.send("❌ You already have an active enlistment session.")
-
-    if not member_input:
-        embed = discord.Embed(title="🎖️ Enlistment", description="Mention or type the member you want to enlist.", color=0x0099ff)
-        embed.add_field(name="Examples", value="`!enlist @user`\n`!enlist Username`\n`!enlist 123456789012345678`")
-        await ctx.send(embed=embed)
-        return
-
-    guild = ctx.guild
-    member = None
-    # accept mention, id, name, or display_name
-    if member_input.startswith('<@') and member_input.endswith('>'):
-        member_id = member_input[2:-1].lstrip('!')
-        try:
-            member = guild.get_member(int(member_id))
-        except Exception:
-            member = None
-    elif member_input.isdigit():
-        member = guild.get_member(int(member_input))
-    else:
-        member = discord.utils.get(guild.members, name=member_input) or discord.utils.get(guild.members, display_name=member_input)
-
-    if not member:
-        return await ctx.send("❌ Member not found.")
-    if member.bot or member.id == ctx.author.id:
-        return await ctx.send("❌ You cannot enlist this user.")
-
-    view = RegimentView(ctx.author.id, member)
-    embed = discord.Embed(title="🎖️ Select Regiment", description=f"Select a regiment for {member.mention}:", color=0x00ff00)
-    await ctx.send(embed=embed, view=view)
-
 @bot.command(name='cancel')
 @is_authorized()
 async def cancel_enlistment(ctx):
@@ -1553,3 +1512,126 @@ if __name__ == "__main__":
         print("Shutting down.")
 
 
+
+
+# ---- Patched awardpoints + enlist helpers (added by assistant) ----
+import re as __re
+from typing import Optional as __Optional
+try:
+    import discord as __discord
+    from discord.ext import commands as __commands
+except Exception:
+    __discord = None
+    __commands = None
+
+async def resolve_member(ctx: __commands.Context, query: str) -> __Optional[__discord.Member]:
+    """Robust member resolver: mention, ID, exact name/display_name, roblox-last-token, partial."""
+    if not query or ctx is None or ctx.guild is None:
+        return None
+    guild = ctx.guild
+    raw = str(query).strip()
+    mention_match = __re.fullmatch(r'<@!?(\d+)>', raw)
+    if mention_match:
+        return guild.get_member(int(mention_match.group(1)))
+    if raw.isdigit():
+        return guild.get_member(int(raw))
+    member = __discord.utils.get(guild.members, name=raw) or __discord.utils.get(guild.members, display_name=raw)
+    if member:
+        return member
+    lowered = raw.lower()
+    for m in guild.members:
+        if (m.name and m.name.lower() == lowered) or (m.display_name and m.display_name.lower() == lowered):
+            return m
+    for m in guild.members:
+        try:
+            nick = m.display_name or m.name or ""
+            if not nick:
+                continue
+            rbx = nick.split()[-1]
+            if rbx.lower() == lowered:
+                return m
+        except Exception:
+            continue
+    for m in guild.members:
+        if lowered in (m.name or "").lower() or lowered in (m.display_name or "").lower():
+            return m
+    return None
+
+# Replace HOST_ROLES or import your HOST_ROLES from your main file. If you have a variable named HOST_ROLES in main, the decorator below will error if it's not available.
+HOST_ROLES = set()
+
+def _register_awardpoints(bot):
+    @_commands.has_any_role(*HOST_ROLES)
+    @bot.command(name="awardpoints")
+    async def awardpoints(ctx: __commands.Context, *args: str):
+        """Usage: !awardpoints <member...> <points>  (last arg is integer points)"""
+        if len(args) < 2:
+            return await ctx.send("Usage: `!awardpoints <member...> <points>`")
+        try:
+            points = int(args[-1])
+        except ValueError:
+            return await ctx.send("Last argument must be the points (integer).")
+        if points <= 0:
+            return await ctx.send("Points must be a positive number.")
+        targets = args[:-1]
+        results = []
+        for inp in targets:
+            member = await resolve_member(ctx, inp)
+            if not member:
+                results.append(f"Could not find member: `{inp}`")
+                continue
+            try:
+                if hasattr(ctx.bot, "_process_award") and callable(ctx.bot._process_award):
+                    msg = await ctx.bot._process_award(ctx, member, points)
+                else:
+                    msg = f"{member.display_name}: Awarded {points} merits (simulation)."
+                results.append(msg)
+            except Exception as e:
+                results.append(f"Error processing `{getattr(member, 'display_name', str(member))}`: {e}")
+        reply = "\n".join(results) or "No targets processed."
+        if len(reply) <= 2000:
+            await ctx.send(reply)
+        else:
+            chunks = []
+            current = []
+            curr_len = 0
+            for line in results:
+                if curr_len + len(line) + 1 > 1900:
+                    chunks.append("\n".join(current))
+                    current = [line]
+                    curr_len = len(line) + 1
+                else:
+                    current.append(line)
+                    curr_len += len(line) + 1
+            if current:
+                chunks.append("\n".join(current))
+            for c in chunks:
+                await ctx.send(c)
+    return awardpoints
+
+def _register_enlist(bot, active_sessions_ref):
+    @_commands.has_any_role(*HOST_ROLES)
+    @bot.command(name='enlist')
+    async def enlist(ctx: __commands.Context, *, member_input: __Optional[str] = None):
+        if ctx.author.id in active_sessions_ref:
+            return await ctx.send("❌ You already have an active enlistment session.")
+        if not member_input:
+            embed = __discord.Embed(title="🎖️ Enlistment", description="Mention or type the member you want to enlist.", color=0x0099FF)
+            embed.add_field(name="Examples", value="`!enlist @user`\n`!enlist Username`\n`!enlist 123456789012345678`")
+            await ctx.send(embed=embed)
+            return
+        member = await resolve_member(ctx, member_input)
+        if not member:
+            return await ctx.send("❌ Member not found.")
+        if member.bot or member.id == ctx.author.id:
+            return await ctx.send("❌ You cannot enlist this user.")
+        active_sessions_ref[member.id] = {
+            'officer_id': ctx.author.id,
+            'member': member,
+            'channel': ctx.channel,
+            'step': 'select_regiment'
+        }
+        await ctx.send(f"✅ Started enlistment for {member.mention}. Ask them to type their Roblox username in this channel.")
+    return enlist
+
+# ---- end patch ----
