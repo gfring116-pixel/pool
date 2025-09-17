@@ -635,7 +635,7 @@ AUTHORIZED_ROLES = {1255061914732597268, 1382604947924979793, 127945022228765502
 REGIMENT_ROLES_ENLIST = {
     '35th': {'role_id': 1357959629359026267, 'prefix': '{35TH}', 'emoji': '🚚'},
     '22nd': {'role_id': 1251102603174215750, 'prefix': '{22ND}', 'emoji': '🪖'},
-    'll': {'role_id': 1320153442244886598, 'prefix': '{LL, Intelligence Unit}', 'emoji': '🛡️'},
+    'll': {'role_id': 1320153442244886598, 'prefix': '{LL, IU}', 'emoji': '🛡️'},
     '1as': {'role_id': 1339571735028174919, 'prefix': '{1AS}', 'emoji': '🛩️'},
     'll': {'role_id': 1387191982866038919, 'prefix': '{LL, Guards}', 'emoji': '🗡️'},
     '6th': {'role_id': 1234503490886176849, 'prefix': '{6TH}', 'emoji': '⚔️'}
