@@ -148,11 +148,11 @@ client = gspread.authorize(creds)
 main_sheet = client.open("__1ST VANGUARD DIVISION MERIT DATA__").sheet1
 # Role IDs for regiments
 REGIMENT_ROLES = {
-    1320153442244886598: "MP",
+    1320153442244886598: "LL",
     1234503490886176849: "6TH",
-    1357959629359026267: "3RD",
-    1387191982866038918919: "1ST",
-    1251102603174215750: "4TH",
+    1357959629359026267: "35TH",
+    1387191982866038918919: "LL",
+    1251102603174215750: "22ND",
     1339571735028174919: "1AS"
 }
 
@@ -684,13 +684,14 @@ class RegimentView(discord.ui.View):
     def make_callback(self, regiment):
         async def callback(interaction):
             # store session keyed by the recruit's ID (so recruit can respond)
-            active_sessions[self.member.id] = {
+            active_sessions[self.officer_id] = {
                 'step': 'roblox_username',
-                'member': self.member,
+                'member': self.member,        # still keep recruit stored here
                 'regiment': regiment,
                 'channel': interaction.channel,
                 'officer_id': self.officer_id
             }
+
             debug_log(f"Regiment selected: {regiment} | officer={self.officer_id} | recruit={self.member.id} | channel={interaction.channel.id}")
 
             embed = discord.Embed(
