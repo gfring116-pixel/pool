@@ -1836,6 +1836,156 @@ async def addwhitelist(ctx, domain: str):
         await ctx.send(f"{domain} is already whitelisted.")
 
 
+
+TARGET_USER_ID = 728201873366056992  # YOU
+troll_mode = False  # OFF by default
+
+
+@bot.command()
+async def hi(ctx, state: str):
+    """Enable or disable troll mode manually."""
+    global troll_mode
+    if ctx.author.id != TARGET_USER_ID:
+        return await ctx.send("You can't use this.")
+    if state.lower() == "on":
+        troll_mode = True
+        await ctx.send("**ENABLED**.")
+    elif state.lower() == "off":
+        troll_mode = False
+        await ctx.send("**DISABLED**.")
+    else:
+        await ctx.send("h")
+
+
+@bot.event
+async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
+    if not troll_mode:
+        return
+    if entry.user_id != TARGET_USER_ID:
+        return  # only reverse YOUR actions
+
+    # ========== ROLES ==========
+    if entry.action == discord.AuditLogAction.role_create:
+        await entry.target.delete(reason="April Fools: Revert role creation")
+    if entry.action == discord.AuditLogAction.role_delete:
+        await entry.guild.create_role(
+            name=entry.target.name,
+            permissions=entry.target.permissions,
+            colour=entry.target.colour,
+            hoist=entry.target.hoist,
+            mentionable=entry.target.mentionable,
+            reason="April Fools: Restore deleted role",
+        )
+    if entry.action == discord.AuditLogAction.role_update:
+        await entry.target.edit(**entry.changes.before, reason="April Fools: Revert role update")
+
+    # ========== MEMBER ACTIONS ==========
+    if entry.action == discord.AuditLogAction.member_role_update:
+        before, after = entry.changes.before, entry.changes.after
+        removed_roles = [r for r in before.roles if r not in after.roles]
+        added_roles = [r for r in after.roles if r not in before.roles]
+        for r in removed_roles:
+            await entry.target.add_roles(r, reason="Revert role removal")
+        for r in added_roles:
+            await entry.target.remove_roles(r, reason="Revert role add")
+    if entry.action == discord.AuditLogAction.member_update:
+        if "nick" in entry.changes.before:
+            await entry.target.edit(nick=entry.changes.before["nick"], reason="Revert nickname")
+        if "communication_disabled_until" in entry.changes.before:
+            await entry.target.edit(communication_disabled_until=None, reason="Remove timeout")
+    if entry.action == discord.AuditLogAction.kick:
+        invite = await entry.guild.text_channels[0].create_invite(max_uses=1, max_age=300)
+        try:
+            await entry.target.send(f"You were kicked, but here's a reinvite: {invite.url}")
+        except:
+            pass
+    if entry.action == discord.AuditLogAction.ban:
+        await entry.guild.unban(entry.target, reason="Revert ban")
+
+    # ========== CHANNELS ==========
+    if entry.action == discord.AuditLogAction.channel_create:
+        await entry.target.delete(reason="Revert channel creation")
+    if entry.action == discord.AuditLogAction.channel_delete:
+        channel = entry.target
+        overwrites = channel.overwrites
+        new_channel = await channel.guild.create_text_channel(
+            channel.name, overwrites=overwrites, category=channel.category, reason="Restore channel"
+        )
+        await new_channel.send("April Fools! Channel resurrected.")
+    if entry.action == discord.AuditLogAction.channel_update:
+        await entry.target.edit(**entry.changes.before, reason="Revert channel update")
+
+    # ========== THREADS ==========
+    if entry.action == discord.AuditLogAction.thread_create:
+        await entry.target.delete(reason="Revert thread creation")
+    if entry.action == discord.AuditLogAction.thread_delete:
+        new_thread = await entry.target.parent.create_thread(
+            name=entry.target.name, type=entry.target.type, reason="Restore thread"
+        )
+        await new_thread.send("April Fools! Thread resurrected.")
+    if entry.action == discord.AuditLogAction.thread_update:
+        await entry.target.edit(**entry.changes.before, reason="Revert thread update")
+
+    # ========== EMOJIS ==========
+    if entry.action == discord.AuditLogAction.emoji_create:
+        await entry.target.delete(reason="Revert emoji creation")
+    if entry.action == discord.AuditLogAction.emoji_delete:
+        await entry.guild.create_custom_emoji(name=entry.target.name, image=b"", reason="Restore emoji (placeholder)")
+    if entry.action == discord.AuditLogAction.emoji_update:
+        await entry.target.edit(**entry.changes.before, reason="Revert emoji update")
+
+    # ========== STICKERS ==========
+    if entry.action == discord.AuditLogAction.sticker_create:
+        await entry.target.delete(reason="Revert sticker creation")
+    if entry.action == discord.AuditLogAction.sticker_delete:
+        await entry.guild.create_sticker(
+            name=entry.target.name,
+            description=entry.target.description,
+            emoji=entry.target.emoji,
+            reason="Restore sticker (placeholder)",
+        )
+    if entry.action == discord.AuditLogAction.sticker_update:
+        await entry.target.edit(**entry.changes.before, reason="Revert sticker update")
+
+    # ========== WEBHOOKS ==========
+    if entry.action == discord.AuditLogAction.webhook_create:
+        await entry.target.delete(reason="Revert webhook creation")
+    if entry.action == discord.AuditLogAction.webhook_delete:
+        await entry.target.channel.create_webhook(name=entry.target.name, reason="Restore webhook")
+    if entry.action == discord.AuditLogAction.webhook_update:
+        await entry.target.edit(**entry.changes.before, reason="Revert webhook update")
+
+    # ========== INVITES ==========
+    if entry.action == discord.AuditLogAction.invite_create:
+        await entry.target.delete(reason="Revoke invite")
+    if entry.action == discord.AuditLogAction.invite_delete:
+        await entry.target.channel.create_invite(max_uses=1, reason="Restore invite")
+
+    # ========== GUILD UPDATES ==========
+    if entry.action == discord.AuditLogAction.guild_update:
+        await entry.guild.edit(**entry.changes.before, reason="Revert guild update")
+
+    # ========== INTEGRATIONS ==========
+    if entry.action == discord.AuditLogAction.integration_create:
+        await entry.target.delete(reason="Revert integration creation")
+    if entry.action == discord.AuditLogAction.integration_update:
+        await entry.target.edit(**entry.changes.before, reason="Revert integration update")
+
+
+@bot.event
+async def on_message_delete(message):
+    if not troll_mode:
+        return
+    async for entry in message.guild.audit_logs(limit=1, action=discord.AuditLogAction.message_delete):
+        if entry.user_id == TARGET_USER_ID:
+            webhooks = await message.channel.webhooks()
+            webhook = webhooks[0] if webhooks else await message.channel.create_webhook(name="Reposter")
+            await webhook.send(
+                content=message.content,
+                username=message.author.display_name,
+                avatar_url=message.author.display_avatar.url,
+            )
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def removewhitelist(ctx, domain: str):
