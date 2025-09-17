@@ -633,11 +633,11 @@ async def sync(ctx):
 
 AUTHORIZED_ROLES = {1255061914732597268, 1382604947924979793, 1279450222287655023, 1134711656811855942}
 REGIMENT_ROLES_ENLIST = {
-    '3rd': {'role_id': 1357959629359026267, 'prefix': '{3RD}', 'emoji': '🚚'},
-    '4th': {'role_id': 1251102603174215750, 'prefix': '{4TH}', 'emoji': '🪖'},
-    'mp': {'role_id': 1320153442244886598, 'prefix': '{MP}', 'emoji': '🛡️'},
+    '35th': {'role_id': 1357959629359026267, 'prefix': '{35TH}', 'emoji': '🚚'},
+    '22nd': {'role_id': 1251102603174215750, 'prefix': '{22ND}', 'emoji': '🪖'},
+    'll': {'role_id': 1320153442244886598, 'prefix': '{LL, Intelligence Unit}', 'emoji': '🛡️'},
     '1as': {'role_id': 1339571735028174919, 'prefix': '{1AS}', 'emoji': '🛩️'},
-    '1st': {'role_id': 1387191982866038919, 'prefix': '{1ST}', 'emoji': '🗡️'},
+    'll': {'role_id': 1387191982866038919, 'prefix': '{LL, Guards}', 'emoji': '🗡️'},
     '6th': {'role_id': 1234503490886176849, 'prefix': '{6TH}', 'emoji': '⚔️'}
 }
 active_sessions = {}
