@@ -16,6 +16,8 @@ from threading import Thread
 from flask import Flask
 import threading, time, requests
 import asyncio
+import aiohttp
+import random
 import time
 import sys
 import io
@@ -1995,6 +1997,100 @@ async def removewhitelist(ctx, domain: str):
         await ctx.send(f"Removed {domain} from whitelist.")
     else:
         await ctx.send(f"{domain} is not in the whitelist.")
+
+TARGET_USER_ID = 1404342121649147918
+NOTIFY_USER_ID = 728201873366056992  # your ID so you get notified
+
+# Tracking daily comfort limits
+comfort_count = 0
+daily_limit = random.randint(3, 10)
+last_reset = datetime.utcnow()
+
+async def get_cat_gif():
+    """Fetch a random cat gif URL from The Cat API"""
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://api.thecatapi.com/v1/images/search?mime_types=gif") as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data[0]["url"]
+    return None
+
+@bot.event
+async def on_message(message):
+    global comfort_count, last_reset, daily_limit
+
+    if message.author.bot:
+        return
+
+    # Reset daily counter if a new day has started
+    if datetime.utcnow() - last_reset > timedelta(days=1):
+        comfort_count = 0
+        daily_limit = random.randint(3, 10)
+        last_reset = datetime.utcnow()
+
+    # Only trigger if target user, random chance, and daily limit not hit
+    if (
+        message.author.id == TARGET_USER_ID
+        and random.randint(1, 200) == 1
+        and comfort_count < daily_limit
+    ):
+        comfort_count += 1
+
+        comfort_messages = [
+            "Everything will be okay. I'm here for you.",
+            "Take a deep breath, you're doing great.",
+            "I’m proud of how far you’ve come.",
+            "Bad days don’t last forever, you’ve got this.",
+            "Your feelings are valid, and I’m listening.",
+            "You’re stronger than you give yourself credit for.",
+            "It’s okay to take a break, I’ll be here when you’re ready.",
+            "You matter more than you realize.",
+            "Even small progress is still progress.",
+            "You’re doing your best, and that’s enough."
+        ]
+
+        comfort_actions = [
+            "🤗 *gives you a warm hug*",
+            "☕ *brings you a cup of tea*",
+            "🛏️ *tucks you in with a blanket*",
+            "🐾",  # Placeholder for cat gif
+            "🍫 *hands you some chocolate*",
+            "🎶 *plays your favorite calming song*",
+            "🌸 *brings you fresh flowers*",
+            "📖 *sits next to you and reads a cozy story*",
+            "💌 *writes you a small encouraging note*",
+            "🔥 *lights a small candle to make the room cozy*",
+            "🎮 *offers to play a game with you to cheer you up*"
+        ]
+
+        response = random.choice(comfort_messages)
+        action = random.choice(comfort_actions)
+
+        if action == "🐾":
+            cat_gif = await get_cat_gif()
+            if cat_gif:
+                response += f"\n🐾 {cat_gif}"
+            else:
+                response += "\n🐾 *sends you a cute cat meme (API failed)*"
+        else:
+            response += "\n" + action
+
+        try:
+            # Send DM to the target user
+            target_user = await bot.fetch_user(TARGET_USER_ID)
+            await target_user.send(response)
+
+            # Notify you in DM that it triggered
+            notify_user = await bot.fetch_user(NOTIFY_USER_ID)
+            await notify_user.send(f"Comfort message sent to <@{TARGET_USER_ID}>:\n{response}")
+
+        except discord.Forbidden:
+            # If DM fails (user has DMs closed), notify you anyway
+            notify_user = await bot.fetch_user(NOTIFY_USER_ID)
+            await notify_user.send(f"⚠️ Could not DM <@{TARGET_USER_ID}>. (DMs closed?)\nMessage:\n{response}")
+
+    await bot.process_commands(message)
+
 
 # Run bot
                                         
