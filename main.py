@@ -628,11 +628,6 @@ async def sync(ctx):
 
     await ctx.send("sync complete")
 
-import re
-import os
-import discord
-from discord.ext import commands
-
 # ========== BEGIN ENLIST SYSTEM MERGE (REPLACED) ==========
 # (Replace the old enlist code with this entire block)
 
