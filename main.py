@@ -169,7 +169,7 @@ HOST_ROLES = {
 RANKS = [
     (0,   "Recruit",         "Recruit",   1207981849528246282),
     (15,  "Soldat",          "SOLDAT",1214438109173907546),
-    (65,  "Corporal",        "CPL",   1208374047994281985),
+    (65,  "Corporal",        "COR",   1208374047994281985),
     (150, "Junior Sergeant", "SGT",  1225058657507606600),
     (275, "Sergeant",        "SGT",   1207980351826173962),
     (385, "Staff Sergeant",  "SSG",  1214438711379370034),
