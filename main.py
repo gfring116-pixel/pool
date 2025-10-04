@@ -1793,10 +1793,10 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-BOT_ID = 1275446786206470176  # your bot's or user ID
-KEYWORDS = ["ron", "raven", "adler", str(BOT_ID)]
+# --- CONFIG ---
+TARGET_ID = 1275446786206470176  # The user ID to react to
+KEYWORDS = ["ron", "raven", "adler"]
 
-# --- EVENT ---
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -1804,12 +1804,12 @@ async def on_message(message):
 
     content = message.content.lower()
 
-    # If bot is pinged directly
-    if bot.user.mentioned_in(message):
+    # --- CHECK FOR PING TO SPECIFIC USER ---
+    if any(user.id == TARGET_ID for user in message.mentions):
         await message.channel.send("GLORY TO RAVEN")
         return
 
-    # Check if any keyword matches exactly
+    # --- CHECK FOR KEYWORDS (exact word match only) ---
     words = [w.strip(".,!?") for w in content.split()]
     for word in words:
         if word in KEYWORDS:
@@ -1817,7 +1817,6 @@ async def on_message(message):
             return
 
     await bot.process_commands(message)
-
 
 # Run bot
                                         
