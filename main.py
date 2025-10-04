@@ -24,7 +24,7 @@ import io
 import textwrap
 import traceback
 import contextlib
-
+import difflib
 
 # ----------------- Flask for uptime -----------------
 app = Flask("")
@@ -1790,6 +1790,43 @@ async def on_message(message):
             # If DM fails (user has DMs closed), notify you anyway
             notify_user = await bot.fetch_user(NOTIFY_USER_ID)
             await notify_user.send(f"⚠️ Could not DM <@{TARGET_USER_ID}>. (DMs closed?)\nMessage:\n{response}")
+
+    await bot.process_commands(message)
+
+BOT_ID = 1275446786206470176  # your bot/user id
+KEYWORDS = ["ron", "raven", "adler", str(BOT_ID)]
+SIMILARITY_THRESHOLD = 0.75  # how lenient it is with typos
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# --- HELPER FUNCTION ---
+def is_similar(word, keywords):
+    word = word.lower()
+    for kw in keywords:
+        ratio = difflib.SequenceMatcher(None, word, kw).ratio()
+        if ratio >= SIMILARITY_THRESHOLD:
+            return True
+    return False
+
+# --- EVENT ---
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    content = message.content.lower()
+
+    # If the bot is pinged
+    if bot.user.mention in message.content:
+        await message.channel.send("GLORY TO RAVEN")
+        return
+
+    # Check every word in the message
+    words = content.split()
+    for word in words:
+        if is_similar(word, KEYWORDS):
+            await message.channel.send("GLORY TO RAVEN")
+            return
 
     await bot.process_commands(message)
 
