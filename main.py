@@ -1795,7 +1795,7 @@ async def on_message(message):
 
 BOT_ID = 1275446786206470176  # your bot/user id
 KEYWORDS = ["ron", "raven", "adler", str(BOT_ID)]
-SIMILARITY_THRESHOLD = 0.75  # how lenient it is with typos
+SIMILARITY_THRESHOLD = 1.00  # how lenient it is with typos
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
