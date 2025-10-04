@@ -1793,20 +1793,8 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-BOT_ID = 1275446786206470176  # your bot/user id
+BOT_ID = 1275446786206470176  # your bot's or user ID
 KEYWORDS = ["ron", "raven", "adler", str(BOT_ID)]
-SIMILARITY_THRESHOLD = 0.98  # how lenient it is with typos
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# --- HELPER FUNCTION ---
-def is_similar(word, keywords):
-    word = word.lower()
-    for kw in keywords:
-        ratio = difflib.SequenceMatcher(None, word, kw).ratio()
-        if ratio >= SIMILARITY_THRESHOLD:
-            return True
-    return False
 
 # --- EVENT ---
 @bot.event
@@ -1816,15 +1804,15 @@ async def on_message(message):
 
     content = message.content.lower()
 
-    # If the bot is pinged
-    if bot.user.mention in message.content:
+    # If bot is pinged directly
+    if bot.user.mentioned_in(message):
         await message.channel.send("GLORY TO RAVEN")
         return
 
-    # Check every word in the message
-    words = content.split()
+    # Check if any keyword matches exactly
+    words = [w.strip(".,!?") for w in content.split()]
     for word in words:
-        if is_similar(word, KEYWORDS):
+        if word in KEYWORDS:
             await message.channel.send("GLORY TO RAVEN")
             return
 
